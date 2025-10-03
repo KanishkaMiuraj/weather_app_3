@@ -1,10 +1,12 @@
-// weather_service.dart
+// services/weather_service.dart
+
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../models/weather_model.dart';
 
 class WeatherService {
   Future<Weather> fetchWeather(double lat, double lon) async {
+    // FIXED URL: Ensures all required data (current weather, hourly humidity/rain, daily forecast/sunrise/sunset) are fetched.
     final url = Uri.parse(
       'https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon&current_weather=true&hourly=precipitation,relativehumidity_2m&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_sum,sunrise,sunset&timezone=auto',
     );
@@ -15,7 +17,7 @@ class WeatherService {
       final json = jsonDecode(response.body);
       return Weather.fromJson(json);
     } else {
-      throw Exception('Failed to load weather');
+      throw Exception('Failed to load weather: ${response.statusCode}');
     }
   }
 }

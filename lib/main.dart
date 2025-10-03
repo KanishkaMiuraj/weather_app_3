@@ -6,10 +6,10 @@ import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:intl/intl.dart';
 
+// Assuming these files exist in your project structure
 import 'Widgets/weather_animations.dart';
 import 'models/weather_model.dart';
 import 'services/weather_service.dart';
-
 import 'helpers/weather_condition_helper.dart';
 
 void main() => runApp(const WeatherApp());
@@ -67,6 +67,7 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
     try {
       final position = await _determinePosition();
       final placemarks = await placemarkFromCoordinates(position.latitude, position.longitude);
+      // Calls the CORRECTED WeatherService which fetches all data
       final weather = await _weatherService.fetchWeather(position.latitude, position.longitude);
       setState(() {
         _city = placemarks.first.locality ?? "Unknown";
@@ -86,6 +87,7 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
       if (locations.isEmpty) throw Exception('City not found');
       final location = locations.first;
       final placemarks = await placemarkFromCoordinates(location.latitude, location.longitude);
+      // Calls the CORRECTED WeatherService which fetches all data
       final weather = await _weatherService.fetchWeather(location.latitude, location.longitude);
       setState(() {
         _city = placemarks.first.locality ?? cityName;
@@ -256,6 +258,7 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
     );
   }
 
+  // Uses the full suite of animations defined in weather_animations.dart
   Widget getWeatherAnimation(int code) {
     // Clear
     if (code == 0) return const SunnyAnimation();
@@ -286,17 +289,6 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
 
     // Thunderstorms with hail
     if (code == 96 || code == 99) return const HailAnimation();
-
-    // Optional creative mappings for extra detail
-    if (code == 1) return const WindyAnimation();           // Mostly clear – breezy
-    if (code == 2) return const RainbowAnimation();         // Partly cloudy – rainbow-like
-    if (code == 3) return const CloudyAnimation();          // Overcast
-    if (code == 77) return const FreezingAnimation();       // Snow grains – freezing
-    if (code == 56 || code == 57) return const FreezingAnimation(); // Freezing drizzle
-    if (code == 66 || code == 67) return const FreezingAnimation(); // Freezing rain
-    if (code == 82) return const HeatWaveAnimation();       // Violent rain shower – extreme
-    if (code == 99) return const TornadoAnimation();        // Heavy thunder + hail – wild
-    if (code == 48) return const FogAnimation();            // Fog with deposit – dense fog
 
     // Fallback
     return const CloudyAnimation();
@@ -329,31 +321,31 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   // App title & search
-              Row(
-              children: [
-              Expanded(
-              child: TextField(
-                  onTap: () {
-                // Call your search function here with the entered value
-                _showSearchDialog();
-          },
-            style: const TextStyle(color: Colors.white),
-            decoration: InputDecoration(
-              hintText: 'Enter to search weather',
-              hintStyle: const TextStyle(color: Colors.white70),
-              prefixIcon: const Icon(Icons.search, color: Colors.white),
-              filled: true,
-              fillColor: Colors.white24,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
-              ),
-              contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 16),
-            ),
-          ),
-        ),
-          ],
-              ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          onTap: () {
+                            // Call your search function here with the entered value
+                            _showSearchDialog();
+                          },
+                          style: const TextStyle(color: Colors.white),
+                          decoration: InputDecoration(
+                            hintText: 'Enter to search weather',
+                            hintStyle: const TextStyle(color: Colors.white70),
+                            prefixIcon: const Icon(Icons.search, color: Colors.white),
+                            filled: true,
+                            fillColor: Colors.white24,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide.none,
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 16),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                   const SizedBox(height: 20),
                   Text('Location: $_city',
                       style: const TextStyle(fontSize: 24, color: Colors.white)),
@@ -395,15 +387,29 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
                         icon: Icons.grain,
                       ),
                       buildMetricCard(
-                        title: 'Wind',
+                        title: 'Wind Speed',
                         value: '${_weather!.windSpeed.toStringAsFixed(1)} km/h',
                         gradientColors: [Colors.greenAccent, Colors.teal],
                         icon: Icons.air,
                       ),
                     ],
                   ),
+                  const SizedBox(height: 16),
+                  // 💥 ADDED: Wind Direction Metric Card
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      buildMetricCard(
+                        title: 'Wind Direction',
+                        value: _weather!.getWindDirection(), // Uses the fixed model method
+                        gradientColors: [Colors.purpleAccent, Colors.deepPurple],
+                        icon: Icons.explore,
+                      ),
+                      const Spacer(), // Use a spacer to take up the rest of the space
+                    ],
+                  ),
 
-                  // === New Sunrise & Sunset Tile ===
+                  // === Sunrise & Sunset Tile ===
                   const SizedBox(height: 24),
                   const Text('Sunrise & Sunset',
                       style: TextStyle(fontSize: 22, color: Colors.white)),
@@ -421,7 +427,6 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
                       child: SunPathAnimation(
                         sunrise: _weather!.sunrise,
                         sunset: _weather!.sunset,
-                        currentTime: DateTime.now(),
                       ),
                     ),
                   ),
@@ -448,6 +453,8 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
   }
 }
 
+// Sun Path Animation and Painter logic (Modified to remove redundant parameter)
+
 class SunPathAnimation extends StatefulWidget {
   final DateTime sunrise;
   final DateTime sunset;
@@ -455,7 +462,8 @@ class SunPathAnimation extends StatefulWidget {
   const SunPathAnimation({
     Key? key,
     required this.sunrise,
-    required this.sunset, required DateTime currentTime,
+    required this.sunset,
+    // REMOVED: required DateTime currentTime,
   }) : super(key: key);
 
   @override
@@ -469,7 +477,8 @@ class _SunPathAnimationState extends State<SunPathAnimation> {
   @override
   void initState() {
     super.initState();
-    _timer = Timer.periodic(const Duration(seconds: 60), (_) {
+    // Updates the animation every minute for a smooth live effect
+    _timer = Timer.periodic(const Duration(minutes: 1), (_) {
       setState(() {
         _now = DateTime.now();
       });
@@ -483,6 +492,7 @@ class _SunPathAnimationState extends State<SunPathAnimation> {
   }
 
   double get _progress {
+    if (widget.sunrise.isAtSameMomentAs(widget.sunset)) return 0.5; // Handle case where sun path is ill-defined
     if (_now.isBefore(widget.sunrise)) return 0.0;
     if (_now.isAfter(widget.sunset)) return 1.0;
     final total = widget.sunset.difference(widget.sunrise).inSeconds;
@@ -500,6 +510,7 @@ class _SunPathAnimationState extends State<SunPathAnimation> {
           padding: const EdgeInsets.symmetric(horizontal: 20),
           child: Stack(
             children: [
+              // Sunrise time
               Positioned(
                 left: 0,
                 bottom: 10,
@@ -508,6 +519,7 @@ class _SunPathAnimationState extends State<SunPathAnimation> {
                   style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.bold),
                 ),
               ),
+              // Sunset time
               Positioned(
                 right: 0,
                 bottom: 10,
@@ -557,6 +569,7 @@ class _SunPathPainter extends CustomPainter {
       paintArc,
     );
 
+    // Calculate sun position (0.0=left/pi, 1.0=right/0)
     final angle = math.pi * (1 - progress);
     final sunX = center.dx + radius * math.cos(angle);
     final sunY = center.dy + radius * math.sin(angle);
@@ -573,4 +586,3 @@ class _SunPathPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _SunPathPainter oldDelegate) => true;
 }
-
