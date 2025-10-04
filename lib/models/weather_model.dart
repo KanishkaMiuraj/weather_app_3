@@ -1,12 +1,11 @@
-// models/weather_model.dart
-
+// weather_model.dart
 class Weather {
   final int weatherCode;
   final double temperature;
   final double humidity;
   final double rain;
   final double windSpeed;
-  final double windDirection; // 💥 ADDED: Required for getWindDirection()
+  final double windDirection; // <--- ADDED FIELD
   final DateTime sunrise;
   final DateTime sunset;
   final List<Forecast> forecast;
@@ -17,7 +16,7 @@ class Weather {
     required this.humidity,
     required this.rain,
     required this.windSpeed,
-    required this.windDirection, // 💥 ADDED
+    required this.windDirection, // <--- ADDED FIELD
     required this.sunrise,
     required this.sunset,
     required this.forecast,
@@ -55,34 +54,24 @@ class Weather {
       humidity: (json['hourly']['relativehumidity_2m'][0] as num).toDouble(),
       rain: (json['hourly']['precipitation'][0] as num).toDouble(),
       windSpeed: (current['windspeed'] as num).toDouble(),
-      windDirection: (current['winddirection'] as num).toDouble(), // 💥 ADDED
+      windDirection: (current['winddirection'] as num).toDouble(), // <--- FETCHED
       sunrise: DateTime.parse(sunriseStr),
       sunset: DateTime.parse(sunsetStr),
       forecast: forecasts,
     );
   }
 
-  // 💥 ADDED: Method required by main.dart for Wind Direction Metric Card
+  // Helper method to convert direction degrees to cardinal point
   String getWindDirection() {
-    if (windDirection >= 337.5 || windDirection < 22.5) {
-      return 'North';
-    } else if (windDirection >= 22.5 && windDirection < 67.5) {
-      return 'North-East';
-    } else if (windDirection >= 67.5 && windDirection < 112.5) {
-      return 'East';
-    } else if (windDirection >= 112.5 && windDirection < 157.5) {
-      return 'South-East';
-    } else if (windDirection >= 157.5 && windDirection < 202.5) {
-      return 'South';
-    } else if (windDirection >= 202.5 && windDirection < 247.5) {
-      return 'South-West';
-    } else if (windDirection >= 247.5 && windDirection < 292.5) {
-      return 'West';
-    } else if (windDirection >= 292.5 && windDirection < 337.5) {
-      return 'North-West';
-    } else {
-      return 'N/A';
-    }
+    if (windDirection >= 337.5 || windDirection < 22.5) return 'N';
+    if (windDirection >= 22.5 && windDirection < 67.5) return 'NE';
+    if (windDirection >= 67.5 && windDirection < 112.5) return 'E';
+    if (windDirection >= 112.5 && windDirection < 157.5) return 'SE';
+    if (windDirection >= 157.5 && windDirection < 202.5) return 'S';
+    if (windDirection >= 202.5 && windDirection < 247.5) return 'SW';
+    if (windDirection >= 247.5 && windDirection < 292.5) return 'W';
+    if (windDirection >= 292.5 && windDirection < 337.5) return 'NW';
+    return '-';
   }
 }
 
