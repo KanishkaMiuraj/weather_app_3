@@ -47,6 +47,14 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
     _loadWeatherForCurrentLocation();
   }
 
+  // Helper function to determine if it is currently day time
+  bool _isDayTime() {
+    if (_weather == null) return true; // Default to day if data is not loaded
+    final now = DateTime.now();
+    // Use the sunrise and sunset times from the weather model
+    return now.isAfter(_weather!.sunrise) && now.isBefore(_weather!.sunset);
+  }
+
   Future<Position> _determinePosition() async {
     bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) throw Exception('Location services are disabled.');
@@ -67,7 +75,6 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
     try {
       final position = await _determinePosition();
       final placemarks = await placemarkFromCoordinates(position.latitude, position.longitude);
-      // Calls the CORRECTED WeatherService which fetches all data
       final weather = await _weatherService.fetchWeather(position.latitude, position.longitude);
       setState(() {
         _city = placemarks.first.locality ?? "Unknown";
@@ -87,7 +94,6 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
       if (locations.isEmpty) throw Exception('City not found');
       final location = locations.first;
       final placemarks = await placemarkFromCoordinates(location.latitude, location.longitude);
-      // Calls the CORRECTED WeatherService which fetches all data
       final weather = await _weatherService.fetchWeather(location.latitude, location.longitude);
       setState(() {
         _city = placemarks.first.locality ?? cityName;
@@ -147,18 +153,25 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
   }
 
   LinearGradient getBackgroundGradient(int weatherCode) {
+    // Determine day/night for background gradient
+    final bool isDay = _isDayTime();
+
     if (weatherCode == 0) {
-      return const LinearGradient(colors: [Color(0xFF87CEEB), Color(0xFF004E92)]);
+      return isDay
+          ? const LinearGradient(colors: [Color(0xFF87CEEB), Color(0xFF004E92)]) // Sunny Day
+          : const LinearGradient(colors: [Color(0xFF0F2027), Color(0xFF203A43)]); // Clear Night
     } else if (weatherCode >= 1 && weatherCode <= 3) {
-      return const LinearGradient(colors: [Color(0xFF90A4AE), Color(0xFF455A64)]);
+      return const LinearGradient(colors: [Color(0xFF90A4AE), Color(0xFF455A64)]); // Cloudy
     } else if ((weatherCode >= 51 && weatherCode <= 67) || (weatherCode >= 80 && weatherCode <= 82)) {
-      return const LinearGradient(colors: [Color(0xFF3A6073), Color(0xFF16222A)]);
+      return const LinearGradient(colors: [Color(0xFF3A6073), Color(0xFF16222A)]); // Rainy
     } else if ((weatherCode >= 71 && weatherCode <= 77) || (weatherCode >= 85 && weatherCode <= 86)) {
-      return const LinearGradient(colors: [Color(0xFFE0EAFC), Color(0xFFCFDEF3)]);
+      return const LinearGradient(colors: [Color(0xFFE0EAFC), Color(0xFFCFDEF3)]); // Snowy
     } else if (weatherCode >= 95) {
-      return const LinearGradient(colors: [Color(0xFF373B44), Color(0xFF4286f4)]);
+      return const LinearGradient(colors: [Color(0xFF373B44), Color(0xFF4286f4)]); // Thunderstorm/Hail
     } else {
-      return const LinearGradient(colors: [Color(0xFF1C1C2A), Color(0xFF323353)]);
+      return isDay
+          ? const LinearGradient(colors: [Color(0xFF1C1C2A), Color(0xFF323353)]) // Default Day
+          : const LinearGradient(colors: [Color(0xFF000000), Color(0xFF0F0F0F)]); // Default Night
     }
   }
 
@@ -258,43 +271,70 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
     );
   }
 
-  // Uses the full suite of animations defined in weather_animations.dart
+  // === CORRECTED WEATHER ANIMATION LOGIC ===
   Widget getWeatherAnimation(int code) {
-    // Clear
-    if (code == 0) return const SunnyAnimation();
+    final bool isDay = _isDayTime();
 
-    // Mainly clear to overcast
-    if (code >= 1 && code <= 3) return const CloudyAnimation();
+    switch (code) {
+    // Clear Sky
+      case 0:
+        return isDay ? const SunnyAnimation() : const NightClearAnimation();
+
+    // Mainly Clear, Partly Cloudy, Overcast
+      case 1:
+      case 2:
+      case 3:
+        return const CloudyAnimation();
 
     // Fog
-    if (code == 45 || code == 48) return const FogAnimation();
+      case 45:
+      case 48:
+        return const CloudyAnimation(); // Using Cloudy for Fog
 
-    // Drizzle
-    if (code >= 51 && code <= 57) return const RainyAnimation();
+    // Drizzle & Rain
+      case 51:
+      case 53:
+      case 55:
+      case 61:
+      case 63:
+      case 65:
+        return const RainyAnimation();
 
-    // Rain
-    if (code >= 61 && code <= 67) return const RainyAnimation();
+    // Freezing Drizzle & Freezing Rain (Ice/Hail conditions)
+      case 56:
+      case 57:
+      case 66:
+      case 67:
+        return const HailAnimation();
 
-    // Snow fall
-    if (code >= 71 && code <= 77) return const SnowAnimation();
+    // Snowfall & Snow Grains
+      case 71:
+      case 73:
+      case 75:
+      case 77:
+        return const SnowAnimation();
 
-    // Rain showers
-    if (code >= 80 && code <= 82) return const RainyAnimation();
+    // Showers (Rain/Snow mix)
+      case 80:
+      case 81:
+      case 82:
+        return const RainyAnimation(); // Heavy showers
 
-    // Snow showers
-    if (code == 85 || code == 86) return const SnowAnimation();
+    // Snow Showers
+      case 85:
+      case 86:
+        return const SnowAnimation();
 
-    // Thunderstorms (no hail)
-    if (code == 95) return const ThunderstormAnimation();
+    // Thunderstorms
+      case 95:
+      case 96:
+      case 99:
+        return const HailAnimation(); // Using HailAnimation for thunderstorms/severe weather
 
-    // Thunderstorms with hail
-    if (code == 96 || code == 99) return const HailAnimation();
-
-    // Fallback
-    return const CloudyAnimation();
+      default:
+        return isDay ? const SunnyAnimation() : const NightClearAnimation();
+    }
   }
-
-
 
   @override
   Widget build(BuildContext context) {
@@ -326,7 +366,6 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
                       Expanded(
                         child: TextField(
                           onTap: () {
-                            // Call your search function here with the entered value
                             _showSearchDialog();
                           },
                           style: const TextStyle(color: Colors.white),
@@ -350,6 +389,7 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
                   Text('Location: $_city',
                       style: const TextStyle(fontSize: 24, color: Colors.white)),
                   const SizedBox(height: 20),
+                  // The animation call uses the corrected logic
                   Center(child: getWeatherAnimation(_weather!.weatherCode)),
                   const SizedBox(height: 20),
                   Center(
@@ -395,17 +435,18 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
                     ],
                   ),
                   const SizedBox(height: 16),
-                  // 💥 ADDED: Wind Direction Metric Card
+                  // Wind Direction Metric Card
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       buildMetricCard(
                         title: 'Wind Direction',
-                        value: _weather!.getWindDirection(), // Uses the fixed model method
+                        // Assuming getWindDirection is defined in your Weather model
+                        value: _weather!.getWindDirection(),
                         gradientColors: [Colors.purpleAccent, Colors.deepPurple],
                         icon: Icons.explore,
                       ),
-                      const Spacer(), // Use a spacer to take up the rest of the space
+                      const Spacer(),
                     ],
                   ),
 
@@ -453,7 +494,7 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
   }
 }
 
-// Sun Path Animation and Painter logic (Modified to remove redundant parameter)
+// Sun Path Animation and Painter logic
 
 class SunPathAnimation extends StatefulWidget {
   final DateTime sunrise;
@@ -463,7 +504,6 @@ class SunPathAnimation extends StatefulWidget {
     Key? key,
     required this.sunrise,
     required this.sunset,
-    // REMOVED: required DateTime currentTime,
   }) : super(key: key);
 
   @override
