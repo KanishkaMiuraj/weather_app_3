@@ -383,21 +383,23 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
     }
   }
 
-  // NEW HELPER FUNCTION TO BUILD THE THREE THEMATIC INSIGHT LINES
+  // UPDATED HELPER FUNCTION TO BUILD THE FIVE THEMATIC INSIGHT LINES
   List<Widget> _buildInsightLines() {
     if (_aiSummary == null) return [const SizedBox.shrink()];
 
-    // Split the summary into lines. The AI prompt enforces three lines.
+    // Split the summary into lines. Now expecting exactly five lines.
     final lines = _aiSummary!.trim().split('\n').where((s) => s.isNotEmpty).toList();
 
-    // Define icons for the three fixed themes
+    // Define icons for the five fixed themes
     final List<IconData> icons = [
-      Icons.wb_sunny_rounded,      // ☀️ Weather Nature
-      Icons.shield_outlined,       // 🛡️ Tactical Suggestion
-      Icons.local_florist_outlined, // 🌿 Environment/Planting
+      Icons.wb_sunny_rounded,      // ☀️ Theme 1: Day's Nature
+      Icons.shield_outlined,       // 🛡️ Theme 2: Tactical Suggestion
+      Icons.eco_outlined,          // 🌿 Theme 3: General Eco Tip
+      Icons.spa_outlined,          // 🌱 Theme 4: SL Cultivation Tip
+      Icons.commute_outlined,      // 🚗 Theme 5: Driver's Road Tip (New Icon)
     ];
 
-    // Custom 'glowing' text style
+    // Custom 'glowing' text style (preserved)
     const glowingTextStyle = TextStyle(
       fontSize: 16,
       color: Colors.white,
@@ -409,7 +411,8 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
       ],
     );
 
-    return List.generate(lines.length.clamp(0, 3), (index) {
+    // Ensure we only process up to 5 lines
+    return List.generate(lines.length.clamp(0, 5), (index) {
       if (index >= icons.length) return const SizedBox.shrink();
 
       return Padding(
