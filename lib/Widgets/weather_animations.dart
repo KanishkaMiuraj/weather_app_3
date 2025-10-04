@@ -1,5 +1,54 @@
+// Widgets/weather_animations.dart
+
+import 'dart:async' show Timer;
 import 'dart:math';
 import 'package:flutter/material.dart';
+
+// --- BASE WIDGET AND UTILITIES ---
+
+class WeatherAnimationBase extends StatelessWidget {
+  final Widget child;
+  final double size;
+  const WeatherAnimationBase({super.key, required this.child, this.size = 250});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: size,
+      height: size,
+      child: Center(child: child),
+    );
+  }
+}
+
+// Custom particle class for managing particle properties
+class Particle {
+  final double xOffset = Random().nextDouble();
+  final double yStart = Random().nextDouble();
+  final double size = 3 + Random().nextDouble() * 2;
+  final double speed = 0.5 + Random().nextDouble() * 0.5;
+  final bool isHail = Random().nextDouble() > 0.8;
+}
+
+// Base painter for drawing a simple cloud shape
+void drawCloud(Canvas canvas, Offset center, double radius, Color color,
+    double opacity, double drift) {
+  final cloudPaint = Paint()
+    ..color = color.withOpacity(opacity)
+    ..style = PaintingStyle.fill;
+
+  final c = center + Offset(drift, 0);
+
+  // Main cloud shape (overlapping circles)
+  canvas.drawCircle(c + Offset(-radius * 0.4, -radius * 0.1), radius * 0.6, cloudPaint);
+  canvas.drawCircle(c + Offset(radius * 0.3, -radius * 0.2), radius * 0.7, cloudPaint);
+  canvas.drawOval(
+    Rect.fromCenter(center: c, width: radius * 1.8, height: radius * 1.0),
+    cloudPaint,
+  );
+}
+
+// --- 1. SUNNY/CLEAR DAY ANIMATION ---
 
 class SunnyAnimation extends StatefulWidget {
   const SunnyAnimation({super.key});
@@ -17,7 +66,6 @@ class _SunnyAnimationState extends State<SunnyAnimation>
   @override
   void initState() {
     super.initState();
-
     _controller =
     AnimationController(vsync: this, duration: const Duration(seconds: 6))
       ..repeat();
@@ -40,39 +88,194 @@ class _SunnyAnimationState extends State<SunnyAnimation>
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
+    return WeatherAnimationBase(
+      child: AnimatedBuilder(
         animation: _controller,
-        builder: (context, child) {
-          return Transform.rotate(
-            angle: _rotationAnimation.value,
-            child: Container(
-              width: 150,
-              height: 150,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: RadialGradient(
-                  colors: [
-                    Colors.orange[400]!.withOpacity(_glowAnimation.value),
-                    Colors.orange[400]!.withOpacity(0.9),
-                  ],
-                  stops: const [0.4, 1],
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.orangeAccent.withOpacity(_glowAnimation.value),
-                    blurRadius: 30,
-                    spreadRadius: 15,
-                  ),
-                ],
-              ),
-              child: const Center(
-                child: Icon(Icons.wb_sunny, size: 100, color: Colors.white),
-              ),
+        builder: (_, child) {
+          return CustomPaint(
+            painter: _SunPainter(
+              rotation: _rotationAnimation.value,
+              glow: _glowAnimation.value,
             ),
           );
-        });
+        },
+      ),
+    );
   }
 }
+
+class _SunPainter extends CustomPainter {
+  final double rotation;
+  final double glow;
+
+  _SunPainter({required this.rotation, required this.glow});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = size.center(Offset.zero);
+    const radius = 50.0;
+
+    // Draw rays
+    final rayPaint = Paint()
+      ..color = Colors.yellow.withOpacity(0.8 * glow)
+      ..strokeWidth = 3
+      ..style = PaintingStyle.stroke;
+
+    const numRays = 12;
+    for (int i = 0; i < numRays; i++) {
+      final angle = (i * (2 * pi / numRays)) + rotation;
+      final start = Offset(
+        center.dx + radius * cos(angle),
+        center.dy + radius * sin(angle),
+      );
+      final end = Offset(
+        center.dx + (radius + 20) * cos(angle),
+        center.dy + (radius + 20) * sin(angle),
+      );
+      canvas.drawLine(start, end, rayPaint);
+    }
+
+    // Draw sun body
+    final sunPaint = Paint()
+      ..color = Colors.yellow
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, 5 * glow)
+      ..style = PaintingStyle.fill;
+
+    canvas.drawCircle(center, radius, sunPaint);
+    canvas.drawCircle(center, radius - 5, Paint()..color = Colors.yellowAccent);
+  }
+
+  @override
+  bool shouldRepaint(_SunPainter oldDelegate) =>
+      oldDelegate.rotation != rotation || oldDelegate.glow != glow;
+}
+
+// --- NIGHT CLEAR ANIMATION (THE FIX) ---
+
+// Line 188 in your old code
+class NightClearAnimation extends StatefulWidget {
+  final double size; // Added size property
+  const NightClearAnimation({super.key, this.size = 250});
+
+  @override
+  State<NightClearAnimation> createState() => _NightClearAnimationState();
+}
+
+class _NightClearAnimationState extends State<NightClearAnimation>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  final List<Particle> _stars = List.generate(50, (_) => Particle());
+  late Animation<double> _moonPhase;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller =
+    AnimationController(vsync: this, duration: const Duration(seconds: 15))
+      ..repeat();
+
+    // Simulates a subtle moon orbit/phase shift for animation
+    _moonPhase = Tween<double>(begin: 0.0, end: 1.0).animate(_controller);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final size = widget.size;
+
+    // **FIX 1: Structural Fix - Enforcing a non-zero size with SizedBox**
+    return SizedBox(
+      width: size,
+      height: size,
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (_, __) {
+          return CustomPaint(
+            // painter class was crashing on line 225
+            painter: _NightClearPainter(
+              stars: _stars,
+              animationValue: _controller.value,
+              moonPhase: _moonPhase.value,
+            ),
+            // It is good practice to explicitly set the size on CustomPaint
+            // even if the parent widget is constrained.
+            size: Size(size, size),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _NightClearPainter extends CustomPainter {
+  final List<Particle> stars;
+  final double animationValue;
+  final double moonPhase;
+
+  _NightClearPainter({required this.stars, required this.animationValue, required this.moonPhase});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // **FIX 2: Defensive Fix - Preventing NaN by checking for zero size**
+    if (size.isEmpty || size.width.isNaN || size.height.isNaN) {
+      return;
+    }
+
+    final center = size.center(Offset.zero);
+    final moonRadius = size.width / 4;
+
+    // 1. Draw Stars
+    final starPaint = Paint()
+      ..color = Colors.white
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 1);
+
+    for (final star in stars) {
+      // The old error-causing line was likely a calculation for position or size
+      // that used 'size.width' or 'size.height' without the check above.
+
+      final x = size.width * star.xOffset;
+      // Stars twinkle slightly based on animation
+      final y = size.height * star.yStart + sin(animationValue * 2 * pi * 5) * 2;
+
+      final starSize = 1 + sin(animationValue * 2 * pi * star.xOffset) * 0.5;
+
+      canvas.drawCircle(Offset(x, y), starSize, starPaint);
+    }
+
+    // 2. Draw Moon (A simple crescent moon effect)
+    final moonCenter = center - Offset(size.width / 8, size.height / 8);
+
+    // Moon body
+    final moonPaint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.fill;
+
+    canvas.drawCircle(moonCenter, moonRadius, moonPaint);
+
+    // Moon shadow (to create the crescent shape)
+    final shadowPaint = Paint()
+      ..color = Colors.indigo.shade900 // Use a dark background color for the shadow
+      ..blendMode = BlendMode.dstOut; // This blend mode cuts out the shape
+
+    // Calculate the shadow offset to create a crescent based on moonPhase
+    final shadowOffset = moonRadius * 0.4;
+    final shadowCenter = moonCenter + Offset(shadowOffset, shadowOffset * sin(moonPhase * 2 * pi));
+
+    canvas.drawCircle(shadowCenter, moonRadius, shadowPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _NightClearPainter oldDelegate) {
+    return oldDelegate.animationValue != animationValue;
+  }
+}
+
+// --- 3. CLOUDY ANIMATION ---
 
 class CloudyAnimation extends StatefulWidget {
   const CloudyAnimation({super.key});
@@ -84,15 +287,15 @@ class CloudyAnimation extends StatefulWidget {
 class _CloudyAnimationState extends State<CloudyAnimation>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
-  late Animation<double> _offsetAnimation;
+  late Animation<double> _driftAnimation;
 
   @override
   void initState() {
     super.initState();
     _controller =
-    AnimationController(vsync: this, duration: const Duration(seconds: 12))
+    AnimationController(vsync: this, duration: const Duration(seconds: 15))
       ..repeat(reverse: true);
-    _offsetAnimation = Tween<double>(begin: -40, end: 40).animate(
+    _driftAnimation = Tween<double>(begin: -20, end: 20).animate(
       CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
     );
   }
@@ -103,58 +306,43 @@ class _CloudyAnimationState extends State<CloudyAnimation>
     super.dispose();
   }
 
-  Widget buildCloud(double size, double opacity, {bool addShadow = true}) {
-    return Container(
-      width: size,
-      height: size * 0.6,
-      decoration: BoxDecoration(
-        color: Colors.grey.shade300.withOpacity(opacity),
-        borderRadius: BorderRadius.circular(size * 0.35),
-        boxShadow: addShadow
-            ? [
-          BoxShadow(
-              color: Colors.grey.shade500.withOpacity(opacity),
-              blurRadius: 6,
-              offset: const Offset(3, 3))
-        ]
-            : [],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: 280,
-      height: 200,
+    return WeatherAnimationBase(
       child: AnimatedBuilder(
-        animation: _offsetAnimation,
-        builder: (context, child) {
-          return Stack(
-            alignment: Alignment.center,
-            children: [
-              Positioned(
-                left: 60 + _offsetAnimation.value,
-                top: 100,
-                child: buildCloud(100, 0.6),
-              ),
-              Positioned(
-                left: 120 - _offsetAnimation.value * 1.2,
-                top: 60,
-                child: buildCloud(70, 0.4, addShadow: false),
-              ),
-              Positioned(
-                left: 180 + _offsetAnimation.value * 0.8,
-                top: 110,
-                child: buildCloud(90, 0.5),
-              ),
-            ],
+        animation: _controller,
+        builder: (_, child) {
+          return CustomPaint(
+            painter: _CloudyPainter(drift: _driftAnimation.value),
           );
         },
       ),
     );
   }
 }
+
+class _CloudyPainter extends CustomPainter {
+  final double drift;
+  _CloudyPainter({required this.drift});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = size.center(Offset.zero);
+    const radius = 60.0;
+    final color = Colors.grey.shade300;
+
+    // Draw main cloud (slightly higher opacity, less drift)
+    drawCloud(canvas, center, radius, color, 1.0, drift * 0.5);
+
+    // Draw secondary cloud (lower opacity, more drift)
+    drawCloud(canvas, center + const Offset(50, 30), radius * 0.7, Colors.grey.shade400, 0.7, drift);
+  }
+
+  @override
+  bool shouldRepaint(_CloudyPainter oldDelegate) => oldDelegate.drift != drift;
+}
+
+// --- 4. RAINY ANIMATION ---
 
 class RainyAnimation extends StatefulWidget {
   const RainyAnimation({super.key});
@@ -166,25 +354,15 @@ class RainyAnimation extends StatefulWidget {
 class _RainyAnimationState extends State<RainyAnimation>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
-
-  late List<double> xPositions;
-  late List<double> speeds;
-  late List<double> lengths;
-  late List<double> widths;
-  final int dropCount = 30;
-  final Random random = Random();
+  late List<Particle> particles;
 
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 1600))
+    _controller =
+    AnimationController(vsync: this, duration: const Duration(seconds: 1))
       ..repeat();
-
-    xPositions = List.generate(dropCount, (_) => random.nextDouble() * 280);
-    speeds = List.generate(dropCount, (_) => 150 + random.nextDouble() * 300);
-    lengths = List.generate(dropCount, (_) => 10 + random.nextDouble() * 15);
-    widths = List.generate(dropCount, (_) => 2 + random.nextDouble() * 2);
+    particles = List.generate(30, (_) => Particle());
   }
 
   @override
@@ -193,57 +371,75 @@ class _RainyAnimationState extends State<RainyAnimation>
     super.dispose();
   }
 
-  Widget buildRaindrop(double x, double progress, double speed, double length,
-      double width) {
-    final y = (progress * speed) % 200;
-    return Positioned(
-      left: x,
-      top: y,
-      child: Container(
-        width: width,
-        height: length,
-        decoration: BoxDecoration(
-          color: Colors.blueAccent.withOpacity(0.7),
-          borderRadius: BorderRadius.circular(width / 2),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.blueAccent.withOpacity(0.5),
-              blurRadius: 3,
-              spreadRadius: 1,
-              offset: const Offset(0, 2),
-            )
-          ],
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: 280,
-      height: 200,
+    return WeatherAnimationBase(
       child: AnimatedBuilder(
-          animation: _controller,
-          builder: (context, child) {
-            return Stack(
-              children: List.generate(dropCount, (index) {
-                return buildRaindrop(xPositions[index], _controller.value,
-                    speeds[index], lengths[index], widths[index]);
-              }),
-            );
-          }),
+        animation: _controller,
+        builder: (_, child) {
+          return CustomPaint(
+            painter: _RainyPainter(
+              rainProgress: _controller.value,
+              particles: particles,
+            ),
+          );
+        },
+      ),
     );
   }
 }
 
+class _RainyPainter extends CustomPainter {
+  final double rainProgress;
+  final List<Particle> particles;
 
+  _RainyPainter({required this.rainProgress, required this.particles});
 
-// -------------------- 6. Snow Animation --------------------
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = size.center(Offset.zero);
+    const cloudRadius = 60.0;
+    final cloudCenter = center - const Offset(0, 50);
+
+    // 1. Draw Cloud
+    drawCloud(canvas, cloudCenter, cloudRadius, Colors.grey.shade600, 1.0, 0);
+
+    // 2. Draw Rain Particles
+    final rainPaint = Paint()
+      ..color = Colors.blue.shade300
+      ..strokeWidth = 2
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+
+    final rainStart = cloudCenter.dy + cloudRadius * 0.5;
+    final rainEnd = size.height;
+
+    for (final particle in particles) {
+      final yPos = (particle.yStart + particle.speed * rainProgress) % 1.0;
+      final xPos = particle.xOffset;
+
+      final startY = rainStart + (rainEnd - rainStart) * yPos;
+      final startX = center.dx - 50 + 100 * xPos;
+
+      if (startY < rainEnd) {
+        canvas.drawLine(
+          Offset(startX, startY),
+          Offset(startX + 5, startY + 15),
+          rainPaint,
+        );
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_RainyPainter oldDelegate) =>
+      oldDelegate.rainProgress != rainProgress;
+}
+
+// --- 5. SNOW ANIMATION ---
 
 class SnowAnimation extends StatefulWidget {
-  final double size;
-  const SnowAnimation({Key? key, this.size = 200}) : super(key: key);
+  const SnowAnimation({super.key});
 
   @override
   State<SnowAnimation> createState() => _SnowAnimationState();
@@ -252,28 +448,15 @@ class SnowAnimation extends StatefulWidget {
 class _SnowAnimationState extends State<SnowAnimation>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
-  late List<Snowflake> _snowflakes;
-  final int flakeCount = 50;
-  final Random random = Random();
+  late List<Particle> particles;
 
   @override
   void initState() {
     super.initState();
-    _snowflakes = List.generate(
-      flakeCount,
-          (index) => Snowflake(
-        x: random.nextDouble(),
-        y: random.nextDouble(),
-        radius: random.nextDouble() * 3 + 2,
-        speed: random.nextDouble() * 0.003 + 0.001,
-        angle: random.nextDouble() * 2 * pi,
-        angleSpeed: random.nextDouble() * 0.01 + 0.005,
-      ),
-    );
-
     _controller =
-    AnimationController(vsync: this, duration: const Duration(seconds: 20))
+    AnimationController(vsync: this, duration: const Duration(seconds: 4))
       ..repeat();
+    particles = List.generate(40, (_) => Particle());
   }
 
   @override
@@ -282,142 +465,17 @@ class _SnowAnimationState extends State<SnowAnimation>
     super.dispose();
   }
 
-  void _updateSnowflakes() {
-    for (var flake in _snowflakes) {
-      flake.y += flake.speed;
-      flake.angle += flake.angleSpeed;
-      if (flake.y > 1) {
-        flake.y = 0;
-        flake.x = random.nextDouble();
-      }
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    final size = widget.size;
-    return SizedBox(
-      width: size,
-      height: size,
-      child: AnimatedBuilder(
-          animation: _controller,
-          builder: (_, __) {
-            _updateSnowflakes();
-            return CustomPaint(
-              painter: _SnowPainter(snowflakes: _snowflakes),
-              size: Size(size, size),
-            );
-          }),
-    );
-  }
-}
-
-class Snowflake {
-  double x;
-  double y;
-  double radius;
-  double speed;
-  double angle;
-  double angleSpeed;
-
-  Snowflake({
-    required this.x,
-    required this.y,
-    required this.radius,
-    required this.speed,
-    required this.angle,
-    required this.angleSpeed,
-  });
-}
-
-class _SnowPainter extends CustomPainter {
-  final List<Snowflake> snowflakes;
-  _SnowPainter({required this.snowflakes});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = Colors.white.withOpacity(0.85);
-
-    for (var flake in snowflakes) {
-      final x = flake.x * size.width + 5 * cos(flake.angle);
-      final y = flake.y * size.height;
-      canvas.drawCircle(Offset(x, y), flake.radius, paint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _SnowPainter oldDelegate) => true;
-}
-
-
-
-
-class FogAnimation extends StatefulWidget {
-  const FogAnimation({super.key});
-
-  @override
-  State<FogAnimation> createState() => _FogAnimationState();
-}
-
-class _FogAnimationState extends State<FogAnimation>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<double> _fogShift;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-        vsync: this, duration: const Duration(seconds: 12))
-      ..repeat();
-
-    _fogShift = Tween<double>(begin: 0, end: 40).animate(
-        CurvedAnimation(parent: _controller, curve: Curves.linear));
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  Widget fogLayer(double top, double opacity) {
-    return Positioned(
-      top: top,
-      left: -80 + _fogShift.value,
-      child: Container(
-        width: 400,
-        height: 80,
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [
-              Colors.grey.withOpacity(opacity),
-              Colors.grey.withOpacity(opacity * 0.7),
-              Colors.transparent
-            ],
-            begin: Alignment.centerLeft,
-            end: Alignment.centerRight,
-          ),
-        ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 280,
-      height: 200,
+    return WeatherAnimationBase(
       child: AnimatedBuilder(
         animation: _controller,
-        builder: (context, child) {
-          return Stack(
-            children: [
-              fogLayer(30, 0.4),
-              fogLayer(70, 0.3),
-              fogLayer(110, 0.25),
-              fogLayer(150, 0.2),
-            ],
+        builder: (_, child) {
+          return CustomPaint(
+            painter: _SnowPainter(
+              snowProgress: _controller.value,
+              particles: particles,
+            ),
           );
         },
       ),
@@ -425,6 +483,48 @@ class _FogAnimationState extends State<FogAnimation>
   }
 }
 
+class _SnowPainter extends CustomPainter {
+  final double snowProgress;
+  final List<Particle> particles;
+
+  _SnowPainter({required this.snowProgress, required this.particles});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = size.center(Offset.zero);
+    const cloudRadius = 60.0;
+    final cloudCenter = center - const Offset(0, 50);
+
+    // 1. Draw Cloud (darker for snowy conditions)
+    drawCloud(canvas, cloudCenter, cloudRadius, Colors.grey.shade700, 1.0, 0);
+
+    // 2. Draw Snow Particles
+    final snowPaint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.fill;
+
+    final snowStart = cloudCenter.dy + cloudRadius * 0.5;
+    final snowEnd = size.height;
+
+    for (final particle in particles) {
+      final yPos = (particle.yStart + particle.speed * snowProgress) % 1.0;
+      final xPos = particle.xOffset;
+
+      final currentY = snowStart + (snowEnd - snowStart) * yPos;
+      final currentX = center.dx - 50 + 100 * xPos;
+
+      if (currentY < snowEnd) {
+        canvas.drawCircle(Offset(currentX, currentY), particle.size * 0.5, snowPaint);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_SnowPainter oldDelegate) =>
+      oldDelegate.snowProgress != snowProgress;
+}
+
+// --- 6. HAIL/THUNDERSTORM ANIMATION ---
 
 class HailAnimation extends StatefulWidget {
   const HailAnimation({super.key});
@@ -436,67 +536,49 @@ class HailAnimation extends StatefulWidget {
 class _HailAnimationState extends State<HailAnimation>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
-  final int hailCount = 25;
-  final Random _random = Random();
-
-  late List<double> xPositions;
-  late List<double> speeds;
-  late List<double> sizes;
+  late List<Particle> particles;
+  late bool _flash;
+  late Timer _flashTimer;
 
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 1800))
+    _controller =
+    AnimationController(vsync: this, duration: const Duration(seconds: 1))
       ..repeat();
+    particles = List.generate(20, (_) => Particle());
+    _flash = false;
 
-    xPositions = List.generate(hailCount, (_) => _random.nextDouble() * 280);
-    speeds = List.generate(hailCount, (_) => 100 + _random.nextDouble() * 200);
-    sizes = List.generate(hailCount, (_) => 4 + _random.nextDouble() * 3);
+    // Create a random lightning flash effect
+    _flashTimer = Timer.periodic(const Duration(milliseconds: 500), (timer) {
+      if (Random().nextDouble() < 0.15) { // 15% chance to flash every 0.5s
+        setState(() => _flash = true);
+        Future.delayed(const Duration(milliseconds: 100), () {
+          setState(() => _flash = false);
+        });
+      }
+    });
   }
 
   @override
   void dispose() {
     _controller.dispose();
+    _flashTimer.cancel();
     super.dispose();
-  }
-
-  Widget buildHailDrop(double x, double progress, double speed, double size) {
-    final y = (progress * speed) % 200;
-    return Positioned(
-      left: x,
-      top: y,
-      child: Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(
-          color: Colors.blueGrey.shade100,
-          shape: BoxShape.circle,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.white.withOpacity(0.6),
-              blurRadius: 2,
-              spreadRadius: 1,
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: 280,
-      height: 200,
+    return WeatherAnimationBase(
       child: AnimatedBuilder(
         animation: _controller,
-        builder: (context, child) {
-          return Stack(
-            children: List.generate(hailCount, (index) {
-              return buildHailDrop(xPositions[index], _controller.value,
-                  speeds[index], sizes[index]);
-            }),
+        builder: (_, child) {
+          return CustomPaint(
+            painter: _HailPainter(
+              hailProgress: _controller.value,
+              particles: particles,
+              flash: _flash,
+            ),
           );
         },
       ),
@@ -504,621 +586,64 @@ class _HailAnimationState extends State<HailAnimation>
   }
 }
 
-
-
-// -------------------- 5. Thunderstorm Animation --------------------
-
-class ThunderstormAnimation extends StatefulWidget {
-  final double size;
-  const ThunderstormAnimation({Key? key, this.size = 300}) : super(key: key); // bigger default size
-
-  @override
-  State<ThunderstormAnimation> createState() => _ThunderstormAnimationState();
-}
-
-class _ThunderstormAnimationState extends State<ThunderstormAnimation>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<double> _lightningOpacity;
-  late Animation<double> _cloudX;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller =
-    AnimationController(vsync: this, duration: const Duration(seconds: 3))
-      ..repeat();
-
-    _lightningOpacity = TweenSequence<double>([
-      TweenSequenceItem(tween: Tween(begin: 0.0, end: 1.0), weight: 20),
-      TweenSequenceItem(tween: Tween(begin: 1.0, end: 0.0), weight: 20),
-      TweenSequenceItem(tween: ConstantTween(0.0), weight: 60),
-    ]).animate(_controller);
-
-    _cloudX = Tween<double>(begin: -10, end: 10).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
-    );
-  }
-
-  bool _shouldShowLightning() {
-    return _lightningOpacity.value > 0.5;
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final size = widget.size;
-    return SizedBox(
-      width: size,
-      height: size * 0.8,
-      child: AnimatedBuilder(
-          animation: _controller,
-          builder: (_, __) {
-            return Stack(
-              children: [
-                CustomPaint(
-                  painter: _ThunderstormPainter(
-                    lightningOpacity: _lightningOpacity.value,
-                    cloudXOffset: _cloudX.value,
-                    showLightning: _shouldShowLightning(),
-                  ),
-                  size: Size(size, size * 0.8),
-                ),
-                // Flash overlay for thunder effect
-                if (_shouldShowLightning())
-                  Opacity(
-                    opacity: _lightningOpacity.value * 0.4, // adjust flash brightness
-                    child: Container(
-                      width: size,
-                      height: size * 0.8,
-                      color: Colors.yellowAccent,
-                    ),
-                  ),
-              ],
-            );
-          }),
-    );
-  }
-}
-
-class _ThunderstormPainter extends CustomPainter {
-  final double lightningOpacity;
-  final double cloudXOffset;
-  final bool showLightning;
-  _ThunderstormPainter({
-    required this.lightningOpacity,
-    required this.cloudXOffset,
-    required this.showLightning,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final cloudPaint = Paint()
-      ..color = Colors.grey.shade700.withOpacity(1);
-
-    final baseY = size.height * 0.5;
-
-    final center1 = Offset(size.width / 2 + cloudXOffset, baseY);
-    _drawCloud(canvas, center1, size.width / 3, cloudPaint);
-
-    final center2 = Offset(size.width / 3 - cloudXOffset * 0.6, baseY * 0.8);
-    final fadedCloudPaint = Paint()..color = cloudPaint.color.withOpacity(0.7);
-    _drawCloud(canvas, center2, size.width / 5, fadedCloudPaint);
-
-    if (showLightning) {
-      final lightningPaint = Paint()
-        ..color = Colors.yellow.withOpacity(lightningOpacity)
-        ..strokeWidth = 6  // a bit thicker for more impact
-        ..strokeCap = StrokeCap.round;
-
-      final path = Path();
-      final startX = size.width / 2;
-      final startY = size.height * 0.3;
-
-      path.moveTo(startX, startY);
-      path.lineTo(startX - 20, startY + 40);
-      path.lineTo(startX + 15, startY + 40);
-      path.lineTo(startX - 15, startY + 90);
-      path.lineTo(startX + 20, startY + 50);
-      path.lineTo(startX, startY + 50);
-      path.close();
-
-      canvas.drawPath(path, lightningPaint);
-    }
-  }
-
-  void _drawCloud(Canvas canvas, Offset center, double width, Paint paint) {
-    final radius = width / 3;
-    canvas.drawCircle(center.translate(-radius, 0), radius, paint);
-    canvas.drawCircle(center, radius * 1.1, paint);
-    canvas.drawCircle(center.translate(radius, 0), radius, paint);
-    canvas.drawRect(
-      Rect.fromCenter(
-          center: center.translate(0, radius / 2), width: width, height: radius * 1.2),
-      paint,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant _ThunderstormPainter oldDelegate) =>
-      oldDelegate.lightningOpacity != lightningOpacity ||
-          oldDelegate.cloudXOffset != cloudXOffset ||
-          oldDelegate.showLightning != showLightning;
-}
-
-// -------------------- 11. Windy Animation --------------------
-
-class WindyAnimation extends StatefulWidget {
-  final double size;
-  const WindyAnimation({Key? key, this.size = 200}) : super(key: key);
-
-  @override
-  State<WindyAnimation> createState() => _WindyAnimationState();
-}
-
-class _WindyAnimationState extends State<WindyAnimation>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<double> _waveShift;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller =
-    AnimationController(vsync: this, duration: const Duration(seconds: 5))
-      ..repeat();
-
-    _waveShift = Tween<double>(begin: 0, end: 1).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.linear),
-    );
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final size = widget.size;
-    return SizedBox(
-      width: size,
-      height: size * 0.4,
-      child: AnimatedBuilder(
-          animation: _controller,
-          builder: (_, __) {
-            return CustomPaint(
-              painter: _WindyPainter(shift: _waveShift.value),
-              size: Size(size, size * 0.4),
-            );
-          }),
-    );
-  }
-}
-
-class _WindyPainter extends CustomPainter {
-  final double shift;
-  _WindyPainter({required this.shift});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.lightBlueAccent.withOpacity(0.7)
-      ..strokeWidth = 6
-      ..strokeCap = StrokeCap.round;
-
-    final waveLength = size.width / 3;
-    final amplitude = size.height / 3;
-
-    for (int i = 0; i < 3; i++) {
-      final y = size.height / 2 + i * amplitude / 1.5;
-      final path = Path();
-      for (double x = -waveLength * 2 + shift * waveLength * 4;
-      x <= size.width + waveLength;
-      x += 1) {
-        final dy = sin((x + i * 20) * 2 * pi / waveLength) * amplitude / 2;
-        if (x == -waveLength * 2 + shift * waveLength * 4) {
-          path.moveTo(x, y + dy);
-        } else {
-          path.lineTo(x, y + dy);
-        }
-      }
-      canvas.drawPath(path, paint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _WindyPainter oldDelegate) => oldDelegate.shift != shift;
-}
-
-
-// -------------------- 12. Rainbow Animation --------------------
-
-class RainbowAnimation extends StatefulWidget {
-  final double size;
-  const RainbowAnimation({Key? key, this.size = 200}) : super(key: key);
-
-  @override
-  State<RainbowAnimation> createState() => _RainbowAnimationState();
-}
-
-class _RainbowAnimationState extends State<RainbowAnimation>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<double> _arcShift;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller =
-    AnimationController(vsync: this, duration: const Duration(seconds: 6))
-      ..repeat();
-
-    _arcShift = Tween<double>(begin: 0, end: 2 * pi).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.linear),
-    );
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  static const List<Color> rainbowColors = [
-    Color(0xFFFF0000), // Red
-    Color(0xFFFF7F00), // Orange
-    Color(0xFFFFFF00), // Yellow
-    Color(0xFF00FF00), // Green
-    Color(0xFF0000FF), // Blue
-    Color(0xFF4B0082), // Indigo
-    Color(0xFF8F00FF), // Violet
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    final size = widget.size;
-    return SizedBox(
-      width: size,
-      height: size / 1.5,
-      child: AnimatedBuilder(
-          animation: _controller,
-          builder: (_, __) {
-            return CustomPaint(
-              painter: _RainbowPainter(arcShift: _arcShift.value),
-              size: Size(size, size / 1.5),
-            );
-          }),
-    );
-  }
-}
-
-class _RainbowPainter extends CustomPainter {
-  final double arcShift;
-  _RainbowPainter({required this.arcShift});
-
-  static const List<Color> rainbowColors = [
-    Color(0xFFFF0000), // Red
-    Color(0xFFFF7F00), // Orange
-    Color(0xFFFFFF00), // Yellow
-    Color(0xFF00FF00), // Green
-    Color(0xFF0000FF), // Blue
-    Color(0xFF4B0082), // Indigo
-    Color(0xFF8F00FF), // Violet
-  ];
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height);
-    final radiusStep = size.width / 14;
-
-    for (int i = 0; i < rainbowColors.length; i++) {
-      final paint = Paint()
-        ..color = rainbowColors[i]
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = radiusStep * 1.5;
-
-      final radius = radiusStep * (i + 1);
-      final startAngle = pi + arcShift;
-      final sweepAngle = pi;
-
-      canvas.drawArc(Rect.fromCircle(center: center, radius: radius), startAngle,
-          sweepAngle, false, paint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _RainbowPainter oldDelegate) =>
-      oldDelegate.arcShift != arcShift;
-}
-
-
-// -------------------- 10. Freezing Animation --------------------
-
-class FreezingAnimation extends StatefulWidget {
-  final double size;
-  const FreezingAnimation({Key? key, this.size = 200}) : super(key: key);
-
-  @override
-  State<FreezingAnimation> createState() => _FreezingAnimationState();
-}
-
-class _FreezingAnimationState extends State<FreezingAnimation>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late List<IceCrystal> _crystals;
-  final int crystalCount = 40;
-  final Random random = Random();
-
-  @override
-  void initState() {
-    super.initState();
-    _crystals = List.generate(
-      crystalCount,
-          (index) => IceCrystal(
-        x: random.nextDouble(),
-        y: random.nextDouble(),
-        length: random.nextDouble() * 15 + 10,
-        angle: random.nextDouble() * 2 * pi,
-        angleSpeed: random.nextDouble() * 0.02 + 0.01,
-      ),
-    );
-    _controller =
-    AnimationController(vsync: this, duration: const Duration(seconds: 20))
-      ..repeat();
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  void _updateCrystals() {
-    for (var crystal in _crystals) {
-      crystal.y += 0.005;
-      crystal.angle += crystal.angleSpeed;
-      if (crystal.y > 1) {
-        crystal.y = 0;
-        crystal.x = random.nextDouble();
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final size = widget.size;
-    return SizedBox(
-      width: size,
-      height: size,
-      child: AnimatedBuilder(
-          animation: _controller,
-          builder: (_, __) {
-            _updateCrystals();
-            return CustomPaint(
-              painter: _FreezingPainter(crystals: _crystals),
-              size: Size(size, size),
-            );
-          }),
-    );
-  }
-}
-
-class IceCrystal {
-  double x;
-  double y;
-  double length;
-  double angle;
-  double angleSpeed;
-
-  IceCrystal({
-    required this.x,
-    required this.y,
-    required this.length,
-    required this.angle,
-    required this.angleSpeed,
-  });
-}
-
-class _FreezingPainter extends CustomPainter {
-  final List<IceCrystal> crystals;
-  _FreezingPainter({required this.crystals});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.cyan.withOpacity(0.7)
-      ..strokeWidth = 3
-      ..strokeCap = StrokeCap.round;
-
-    for (var crystal in crystals) {
-      final pos = Offset(crystal.x * size.width, crystal.y * size.height);
-      canvas.save();
-      canvas.translate(pos.dx, pos.dy);
-      canvas.rotate(crystal.angle);
-
-      canvas.drawLine(Offset.zero, Offset(0, crystal.length), paint);
-      canvas.drawLine(Offset(-crystal.length / 2, crystal.length / 2),
-          Offset(crystal.length / 2, crystal.length / 2), paint);
-      canvas.drawLine(Offset(-crystal.length / 3, crystal.length / 3),
-          Offset(crystal.length / 3, crystal.length / 3), paint);
-
-      canvas.restore();
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _FreezingPainter oldDelegate) => true;
-}
-
-
-// -------------------- 9. Heat Wave Animation --------------------
-
-class HeatWaveAnimation extends StatefulWidget {
-  final double size;
-  const HeatWaveAnimation({Key? key, this.size = 200}) : super(key: key);
-
-  @override
-  State<HeatWaveAnimation> createState() => _HeatWaveAnimationState();
-}
-
-class _HeatWaveAnimationState extends State<HeatWaveAnimation>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<double> _waveShift;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller =
-    AnimationController(vsync: this, duration: const Duration(seconds: 4))
-      ..repeat();
-
-    _waveShift = Tween<double>(begin: 0, end: 2 * pi).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.linear),
-    );
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final size = widget.size;
-    return SizedBox(
-      width: size,
-      height: size / 3,
-      child: AnimatedBuilder(
-          animation: _controller,
-          builder: (_, __) {
-            return CustomPaint(
-              painter: _HeatWavePainter(shift: _waveShift.value),
-              size: Size(size, size / 3),
-            );
-          }),
-    );
-  }
-}
-
-class _HeatWavePainter extends CustomPainter {
-  final double shift;
-  _HeatWavePainter({required this.shift});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.orange.withOpacity(0.7)
-      ..strokeWidth = 4
-      ..style = PaintingStyle.stroke;
-
-    final waveLength = size.width / 4;
-    final amplitude = size.height / 2;
-
-    final path = Path();
-    for (double x = 0; x <= size.width; x++) {
-      final y = size.height / 2 + sin((x / waveLength * 2 * pi) + shift) * amplitude / 2;
-      if (x == 0) {
-        path.moveTo(x, y);
-      } else {
-        path.lineTo(x, y);
-      }
-    }
-    canvas.drawPath(path, paint);
-  }
-
-  @override
-  bool shouldRepaint(covariant _HeatWavePainter oldDelegate) => true;
-}
-
-
-// -------------------- 8. Tornado Animation --------------------
-
-class TornadoAnimation extends StatefulWidget {
-  final double size;
-  const TornadoAnimation({Key? key, this.size = 200}) : super(key: key);
-
-  @override
-  State<TornadoAnimation> createState() => _TornadoAnimationState();
-}
-
-class _TornadoAnimationState extends State<TornadoAnimation>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<double> _rotation;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller =
-    AnimationController(vsync: this, duration: const Duration(seconds: 6))
-      ..repeat();
-
-    _rotation = Tween<double>(begin: 0, end: 2 * pi).animate(_controller);
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final size = widget.size;
-    return SizedBox(
-      width: size,
-      height: size,
-      child: AnimatedBuilder(
-          animation: _controller,
-          builder: (_, __) {
-            return CustomPaint(
-              painter: _TornadoPainter(rotation: _rotation.value),
-              size: Size(size, size),
-            );
-          }),
-    );
-  }
-}
-
-class _TornadoPainter extends CustomPainter {
-  final double rotation;
-  _TornadoPainter({required this.rotation});
+class _HailPainter extends CustomPainter {
+  final double hailProgress;
+  final List<Particle> particles;
+  final bool flash;
+
+  _HailPainter({required this.hailProgress, required this.particles, required this.flash});
 
   @override
   void paint(Canvas canvas, Size size) {
     final center = size.center(Offset.zero);
+    const cloudRadius = 70.0;
+    final cloudCenter = center - const Offset(0, 50);
 
-    final paint = Paint()
-      ..color = Colors.grey.shade600.withOpacity(0.7)
-      ..strokeWidth = 6
-      ..style = PaintingStyle.stroke;
+    // 1. Draw Cloud (very dark for storms)
+    drawCloud(canvas, cloudCenter, cloudRadius, Colors.grey.shade900, 1.0, 0);
 
-    final maxRadius = size.width / 3;
+    // 2. Draw Lightning (Hailstorms are usually thunderstorms)
+    if (flash) {
+      final lightningPaint = Paint()
+        ..color = Colors.yellow.shade100.withOpacity(0.8)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10);
 
-    for (int i = 0; i < 5; i++) {
-      final radius = maxRadius * (1 - i * 0.15);
-      final startAngle = rotation + i * pi / 3;
-      final sweepAngle = pi / 2;
-      canvas.drawArc(
-        Rect.fromCircle(center: center, radius: radius),
-        startAngle,
-        sweepAngle,
-        false,
-        paint,
-      );
+      final path = Path()
+        ..moveTo(cloudCenter.dx + 20, cloudCenter.dy + 30)
+        ..lineTo(cloudCenter.dx - 10, cloudCenter.dy + 70)
+        ..lineTo(cloudCenter.dx + 15, cloudCenter.dy + 70)
+        ..lineTo(cloudCenter.dx, cloudCenter.dy + 120);
+
+      canvas.drawPath(path, lightningPaint..style = PaintingStyle.stroke..strokeWidth = 3);
+      canvas.drawPath(path, lightningPaint..color = Colors.yellow.shade400.withOpacity(0.8));
+    }
+
+    // 3. Draw Hail Particles
+    final hailPaint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.fill;
+
+    final hailStart = cloudCenter.dy + cloudRadius * 0.5;
+    final hailEnd = size.height;
+
+    for (final particle in particles) {
+      final yPos = (particle.yStart + particle.speed * hailProgress) % 1.0;
+      final xPos = particle.xOffset;
+
+      final startY = hailStart + (hailEnd - hailStart) * yPos;
+      final startX = center.dx - 50 + 100 * xPos;
+
+      if (startY < hailEnd) {
+        // Draw hail (small, hard-looking circles or ovals)
+        canvas.drawOval(
+          Rect.fromCircle(center: Offset(startX, startY), radius: 3),
+          hailPaint,
+        );
+      }
     }
   }
 
   @override
-  bool shouldRepaint(covariant _TornadoPainter oldDelegate) =>
-      oldDelegate.rotation != rotation;
+  bool shouldRepaint(_HailPainter oldDelegate) =>
+      oldDelegate.hailProgress != hailProgress || oldDelegate.flash != flash;
 }
