@@ -1,7 +1,5 @@
-import 'dart:ui';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
 class SunPathWidget extends StatelessWidget {
   final DateTime sunrise;
@@ -15,53 +13,52 @@ class SunPathWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Calculate the total duration of daylight in seconds
     final daylightDuration = sunset.difference(sunrise).inSeconds;
-
-    // Calculate the time elapsed since sunrise (or before if pre-sunrise)
     final now = DateTime.now();
     final timeSinceSunrise = now.difference(sunrise).inSeconds;
 
-    // Calculate progress (0.0 = sunrise, 1.0 = sunset)
-    double progress = daylightDuration > 0 ? timeSinceSunrise / daylightDuration : 0.0;
-
-    // Clamp progress to be between 0.0 and 1.0 for accurate sun position
+    // Logic: If before sunrise, 0.0. If after sunset, 1.0.
+    double progress = 0.0;
+    if (daylightDuration > 0) {
+      progress = timeSinceSunrise / daylightDuration;
+    }
     progress = progress.clamp(0.0, 1.0);
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
       decoration: BoxDecoration(
-        color: Colors.indigo.shade50,
-        borderRadius: BorderRadius.circular(16),
+        color: Colors.white.withOpacity(0.15), // Glassmorphism style to match main
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.white12),
       ),
       child: Column(
         children: [
-          const Text(
-            'Sun Path',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.indigo),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Sunrise', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                  Text(_formatTime(sunrise, context), style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.amberAccent)),
+                ],
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  const Text('Sunset', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                  Text(_formatTime(sunset, context), style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.deepOrangeAccent)),
+                ],
+              ),
+            ],
           ),
+          const SizedBox(height: 10),
           SizedBox(
-            height: 120,
+            height: 100, // Reduced height for tighter UI
             child: CustomPaint(
               painter: _SunPathPainter(progress: progress),
               child: const SizedBox.expand(),
             ),
-          ),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Icon(Icons.wb_sunny_outlined, color: Colors.amber),
-              Text(
-                _formatTime(sunrise, context),
-                style: const TextStyle(fontWeight: FontWeight.bold),
-              ),
-              const Spacer(),
-              Text(
-                _formatTime(sunset, context),
-                style: const TextStyle(fontWeight: FontWeight.bold),
-              ),
-              const Icon(Icons.nights_stay_outlined, color: Colors.blueGrey),
-            ],
           ),
         ],
       ),
@@ -69,7 +66,6 @@ class SunPathWidget extends StatelessWidget {
   }
 
   String _formatTime(DateTime time, BuildContext context) {
-    // Helper to format time based on local device settings (12h/24h)
     return TimeOfDay.fromDateTime(time).format(context);
   }
 }
@@ -81,41 +77,62 @@ class _SunPathPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    // 1. Draw the Arc
     final paintArc = Paint()
-      ..color = Colors.orangeAccent.withOpacity(0.6)
+      ..color = Colors.white.withOpacity(0.3)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 6;
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = 4;
 
+    // 2. Draw the Sun
     final paintSun = Paint()
-      ..color = Colors.yellowAccent
+      ..color = Colors.amber
       ..style = PaintingStyle.fill
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
 
     final center = Offset(size.width / 2, size.height);
-    final radius = size.width / 2;
+    // Radius should fit within width and height
+    final radius = math.min(size.width / 2, size.height - 10);
 
-    // Draw arc (sun path)
+    // Draw full arc background
     canvas.drawArc(
       Rect.fromCircle(center: center, radius: radius),
       math.pi,
-      math.pi, // Half a circle
+      math.pi,
       false,
       paintArc,
     );
 
-    // Calculate sun position on the arc.
-    // Progress 0.0 -> angle math.pi (180 deg, left/sunrise)
-    // Progress 1.0 -> angle 0 (0 deg, right/sunset)
-    final angle = math.pi * (1 - progress);
+    // Draw active arc (time passed)
+    final activeArcPaint = Paint()
+      ..shader = const LinearGradient(colors: [Colors.amber, Colors.orange])
+          .createShader(Rect.fromCircle(center: center, radius: radius))
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = 4;
+
+    final currentAngle = math.pi * progress;
+
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius),
+      math.pi,
+      currentAngle, // Sweep angle
+      false,
+      activeArcPaint,
+    );
+
+    // Calculate Sun Position
+    // pi = left, 0 = right.
+    // We start at pi and move to 0 based on progress.
+    final angle = math.pi + (math.pi * progress);
+
     final sunX = center.dx + radius * math.cos(angle);
     final sunY = center.dy + radius * math.sin(angle);
 
-    // Draw sun (radius 12)
-    canvas.drawCircle(Offset(sunX, sunY), 12, paintSun);
+    canvas.drawCircle(Offset(sunX, sunY), 10, paintSun);
+    canvas.drawCircle(Offset(sunX, sunY), 4, Paint()..color = Colors.white);
   }
 
   @override
-  bool shouldRepaint(covariant _SunPathPainter oldDelegate) {
-    return oldDelegate.progress != progress;
-  }
+  bool shouldRepaint(covariant _SunPathPainter oldDelegate) => oldDelegate.progress != progress;
 }
