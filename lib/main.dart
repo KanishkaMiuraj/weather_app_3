@@ -11,20 +11,23 @@ import 'helpers/weather_condition_helper.dart';
 
 // Widgets
 import 'Widgets/weather_animations.dart';
-import 'Widgets/sun_path_widget.dart'; // Using the dedicated file
+import 'Widgets/sun_path_widget.dart';
+
+// Screens
+import 'screens/journey_screen.dart'; // Import the new Journey Screen
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   String resolvedApiKey = '';
 
   try {
+    // Load environment variables
     await dotenv.load(fileName: ".env");
     resolvedApiKey = dotenv.env['GEMINI_API_KEY'] ?? '';
   } catch (e) {
     debugPrint("DOTENV ERROR: $e");
   }
 
-  // Graceful fallback if API key is missing (Professional apps don't crash on startup)
   runApp(WeatherApp(geminiApiKey: resolvedApiKey));
 }
 
@@ -58,7 +61,6 @@ class WeatherHomePage extends StatefulWidget {
 }
 
 class _WeatherHomePageState extends State<WeatherHomePage> {
-  // Logic extracted to Repository
   late final WeatherRepository _repository;
 
   Weather? _weather;
@@ -82,7 +84,6 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
     await _fetchData(() => _repository.getWeatherForCity(city));
   }
 
-  // Unified fetching logic
   Future<void> _fetchData(Future<Map<String, dynamic>> Function() fetcher) async {
     setState(() {
       _loading = true;
@@ -103,7 +104,6 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
       if (mounted) {
         setState(() {
           _loading = false;
-          // Clean up error message for user display
           _errorMessage = e.toString().replaceAll('Exception: ', '');
         });
       }
@@ -115,8 +115,6 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
     final now = DateTime.now();
     return now.isAfter(_weather!.sunrise) && now.isBefore(_weather!.sunset);
   }
-
-  // --- UI COMPONENTS ---
 
   void _showSearchDialog() {
     final TextEditingController controller = TextEditingController();
@@ -154,17 +152,13 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
 
   LinearGradient getBackgroundGradient(int weatherCode) {
     final bool isDay = _isDayTime();
-    // Simplified map for brevity, same logic as before
     if (weatherCode == 0) {
       return isDay
           ? const LinearGradient(colors: [Color(0xFF87CEEB), Color(0xFF004E92)], begin: Alignment.topCenter, end: Alignment.bottomCenter)
           : const LinearGradient(colors: [Color(0xFF0F2027), Color(0xFF203A43)], begin: Alignment.topCenter, end: Alignment.bottomCenter);
     }
-    // Default fallback
     return const LinearGradient(colors: [Color(0xFF1C1C2A), Color(0xFF323353)], begin: Alignment.topCenter, end: Alignment.bottomCenter);
   }
-
-  // --- BUILD METHOD ---
 
   @override
   Widget build(BuildContext context) {
@@ -173,6 +167,25 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
         : const LinearGradient(colors: [Color(0xFF232526), Color(0xFF414345)]);
 
     return Scaffold(
+      // --- NEW FEATURE BUTTON ---
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () {
+          // Navigate to Journey Screen (No Google Maps API Key needed anymore!)
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => JourneyScreen(
+                geminiApiKey: widget.geminiApiKey,
+              ),
+            ),
+          );
+        },
+        backgroundColor: Colors.amber,
+        icon: const Icon(Icons.map, color: Colors.black),
+        label: const Text("Plan Journey", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+      ),
+      // ---------------------------
+
       body: Container(
         decoration: BoxDecoration(gradient: bgGradient),
         child: SafeArea(
@@ -252,15 +265,14 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
     );
   }
 
-  // Professional Skeleton Loading (Simulated Shimmer)
   Widget _buildShimmerLoading() {
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
         const SizedBox(height: 40),
-        Center(child: _buildShimmerBox(width: 150, height: 150, borderRadius: 75)), // Circle
+        Center(child: _buildShimmerBox(width: 150, height: 150, borderRadius: 75)),
         const SizedBox(height: 20),
-        Center(child: _buildShimmerBox(width: 200, height: 30, borderRadius: 8)), // Text
+        Center(child: _buildShimmerBox(width: 200, height: 30, borderRadius: 8)),
         const SizedBox(height: 40),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -270,7 +282,7 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
           ],
         ),
         const SizedBox(height: 20),
-        _buildShimmerBox(width: double.infinity, height: 200, borderRadius: 16), // Summary
+        _buildShimmerBox(width: double.infinity, height: 200, borderRadius: 16),
       ],
     );
   }
@@ -314,7 +326,6 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
             ),
             const SizedBox(height: 30),
 
-            // Metrics Grid
             GridView.count(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
@@ -351,14 +362,10 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
             ),
 
             const SizedBox(height: 24),
-
-            // Using the External Widget file here!
             SunPathWidget(sunrise: _weather!.sunrise, sunset: _weather!.sunset),
-
             const SizedBox(height: 24),
             _buildAiSummaryCard(),
             const SizedBox(height: 24),
-
             const Text('7-Day Forecast', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
             SizedBox(
@@ -371,7 +378,7 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
                 },
               ),
             ),
-            const SizedBox(height: 40),
+            const SizedBox(height: 80),
           ],
         ),
       ),
@@ -402,14 +409,13 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
   Widget _buildAiSummaryCard() {
     if (_aiSummary == null) return const SizedBox.shrink();
 
-    // Parse lines exactly as before
     final lines = _aiSummary!.trim().split('\n').where((s) => s.isNotEmpty).toList();
     final List<IconData> icons = [Icons.wb_sunny, Icons.shield_outlined, Icons.eco_outlined, Icons.spa_outlined, Icons.commute_outlined];
 
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.3), // Darker background for readability
+        color: Colors.black.withOpacity(0.3),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.white24),
       ),
@@ -420,7 +426,7 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
             children: const [
               Icon(Icons.auto_awesome, color: Colors.amberAccent),
               SizedBox(width: 10),
-              Text('AI Daily Insights', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              Text('Avani\'s Insights', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             ],
           ),
           const SizedBox(height: 16),
@@ -456,7 +462,6 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
           Text(DateFormat('EEE, d').format(DateTime.parse(forecast.date)), style: const TextStyle(fontWeight: FontWeight.bold)),
-          // Note: In a real app, you'd map small icons to forecast.weatherCode here
           Icon(Icons.cloud, color: Colors.white.withOpacity(0.8), size: 32),
           Text(getWeatherCondition(forecast.weatherCode).split(" ").first, style: const TextStyle(fontSize: 12, color: Colors.white70)),
           Row(
@@ -474,9 +479,8 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
 
   Widget getWeatherAnimation(int code) {
     final bool isDay = _isDayTime();
-    // Simplified switch for brevity - maps to your existing widgets
     switch (code) {
-      case 0: return isDay ? const SunnyAnimation() : const NightClearAnimation(size: 200); // Fixed size
+      case 0: return isDay ? const SunnyAnimation() : const NightClearAnimation(size: 200);
       case 1: case 2: case 3: return const CloudyAnimation();
       case 51: case 53: case 61: case 63: return const RainyAnimation();
       case 71: case 73: return const SnowAnimation();
