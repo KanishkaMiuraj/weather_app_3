@@ -28,6 +28,7 @@ Future<void> main() async {
     debugPrint("DOTENV ERROR: $e");
   }
 
+  // Graceful fallback if API key is missing
   runApp(WeatherApp(geminiApiKey: resolvedApiKey));
 }
 
@@ -116,6 +117,8 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
     return now.isAfter(_weather!.sunrise) && now.isBefore(_weather!.sunset);
   }
 
+  // --- UI COMPONENTS ---
+
   void _showSearchDialog() {
     final TextEditingController controller = TextEditingController();
     showDialog(
@@ -160,6 +163,8 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
     return const LinearGradient(colors: [Color(0xFF1C1C2A), Color(0xFF323353)], begin: Alignment.topCenter, end: Alignment.bottomCenter);
   }
 
+  // --- BUILD METHOD ---
+
   @override
   Widget build(BuildContext context) {
     final bgGradient = _weather != null
@@ -170,7 +175,7 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
       // --- NEW FEATURE BUTTON ---
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () {
-          // Navigate to Journey Screen (No Google Maps API Key needed anymore!)
+          // Navigate to Journey Screen (No Google Maps API Key needed!)
           Navigator.push(
             context,
             MaterialPageRoute(
@@ -426,7 +431,8 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
             children: const [
               Icon(Icons.auto_awesome, color: Colors.amberAccent),
               SizedBox(width: 10),
-              Text('Avani\'s Insights', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              // CHANGED: Generic text to "Daily Insights"
+              Text('Daily Insights', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             ],
           ),
           const SizedBox(height: 16),

@@ -1,7 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:ui'; // Required for ImageFilter
+import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart'; // Free Map Widget
-import 'package:latlong2/latlong.dart'; // Coordinate System
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:geocoding/geocoding.dart';
 
 // Services
@@ -41,6 +44,9 @@ class _JourneyScreenState extends State<JourneyScreen> {
   List<Marker> _markers = [];
   List<Weather> _routeWeather = [];
 
+  // Map Key: 'start', 'mid', 'end'
+  Map<String, List<Map<String, dynamic>>> _hourlyForecasts = {};
+
   String? _journeySummary;
   String? _durationText;
   String? _distanceText;
@@ -52,7 +58,7 @@ class _JourneyScreenState extends State<JourneyScreen> {
   @override
   void initState() {
     super.initState();
-    _directionsService = DirectionsService(); // Uses free OSRM
+    _directionsService = DirectionsService();
     _weatherService = WeatherService();
     _assistantService = WeatherAssistantService(widget.geminiApiKey);
   }
@@ -70,11 +76,11 @@ class _JourneyScreenState extends State<JourneyScreen> {
     setState(() {
       _isLoading = true;
       _journeySummary = null;
+      _hourlyForecasts = {};
     });
-    FocusScope.of(context).unfocus(); // Close keyboard
+    FocusScope.of(context).unfocus();
 
     try {
-      // 1. Geocode Start & End Locations
       List<Location> startLocs = await locationFromAddress(_startController.text);
       List<Location> endLocs = await locationFromAddress(_endController.text);
 
@@ -85,29 +91,25 @@ class _JourneyScreenState extends State<JourneyScreen> {
       LatLng start = LatLng(startLocs.first.latitude, startLocs.first.longitude);
       LatLng end = LatLng(endLocs.first.latitude, endLocs.first.longitude);
 
-      // 2. Get Directions (Route Line) from OSRM
       final directionData = await _directionsService.getDirections(start, end);
       final List<LatLng> polylinePoints = directionData['polyline'];
 
-      // 3. Sample Points Logic (Start, Middle, End)
       List<Map<String, double>> samplePoints = [];
+      LatLng? midPoint;
 
-      // Start Point
       samplePoints.add({'lat': start.latitude, 'lng': start.longitude});
 
-      // Middle Point (only if route is long enough)
       if (polylinePoints.length > 20) {
-        final mid = polylinePoints[polylinePoints.length ~/ 2];
-        samplePoints.add({'lat': mid.latitude, 'lng': mid.longitude});
+        final midIndex = polylinePoints.length ~/ 2;
+        midPoint = polylinePoints[midIndex];
+        samplePoints.add({'lat': midPoint.latitude, 'lng': midPoint.longitude});
       }
 
-      // End Point
       samplePoints.add({'lat': end.latitude, 'lng': end.longitude});
 
-      // 4. Fetch Weather for all sampled points
       final weatherList = await _weatherService.fetchRouteWeather(samplePoints);
+      await _fetchHourlyForecasts(start, midPoint, end);
 
-      // 5. Get AI Insight (Generic Travel Assistant)
       final summary = await _assistantService.getJourneySummary(
           _startController.text,
           _endController.text,
@@ -115,7 +117,6 @@ class _JourneyScreenState extends State<JourneyScreen> {
           directionData['duration']
       );
 
-      // 6. Update UI State
       setState(() {
         _routeWeather = weatherList;
         _journeySummary = summary;
@@ -125,57 +126,58 @@ class _JourneyScreenState extends State<JourneyScreen> {
 
         _markers = [];
 
-        // Helper function to build custom marker widgets
         Marker buildMarker(LatLng pos, Color color, int weatherCode, String label) {
           return Marker(
             point: pos,
             width: 80,
-            height: 90,
+            height: 100, // Increased height for marker
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Weather Tag
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                   decoration: BoxDecoration(
                     color: Colors.white,
-                    borderRadius: BorderRadius.circular(8),
-                    boxShadow: const [BoxShadow(blurRadius: 4, color: Colors.black26)],
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: const [BoxShadow(blurRadius: 8, color: Colors.black38)],
                   ),
                   child: Column(
                     children: [
                       Text(
                         label,
-                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: color),
+                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: color),
                       ),
-                      Text(
-                        "${getWeatherCondition(weatherCode).split(" ").first} ${weatherList[0].temperature.round()}°",
-                        style: const TextStyle(fontSize: 10, color: Colors.black87),
+                      const SizedBox(height: 2),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(_getWeatherIcon(weatherCode), size: 12, color: Colors.black87),
+                          const SizedBox(width: 4),
+                          Text(
+                            "${weatherList[0].temperature.round()}°",
+                            style: const TextStyle(fontSize: 11, color: Colors.black87, fontWeight: FontWeight.bold),
+                          ),
+                        ],
                       ),
                     ],
                   ),
                 ),
-                // Pin Icon
-                Icon(Icons.location_on, color: color, size: 40),
+                Icon(Icons.location_on, color: color, size: 45),
               ],
             ),
           );
         }
 
-        // Add Start Marker
         _markers.add(buildMarker(start, Colors.green.shade700, weatherList[0].weatherCode, "START"));
 
-        // Add Mid Marker (if exists)
         if (weatherList.length > 2 && polylinePoints.length > 20) {
           final mid = polylinePoints[polylinePoints.length ~/ 2];
           _markers.add(buildMarker(mid, Colors.amber.shade800, weatherList[1].weatherCode, "MID"));
         }
 
-        // Add End Marker
         _markers.add(buildMarker(end, Colors.red.shade700, weatherList.last.weatherCode, "END"));
       });
 
-      // 7. Auto-zoom to show the full route
       _fitBounds(polylinePoints);
 
     } catch (e) {
@@ -190,7 +192,78 @@ class _JourneyScreenState extends State<JourneyScreen> {
     }
   }
 
-  // Helper to zoom the map to fit the route
+  Future<void> _fetchHourlyForecasts(LatLng start, LatLng? mid, LatLng end) async {
+    Future<List<Map<String, dynamic>>> fetchForLocation(double lat, double lon) async {
+      try {
+        final url = Uri.parse(
+            'https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon&hourly=temperature_2m,weathercode&forecast_days=2'
+        );
+        final response = await http.get(url);
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          final hourly = data['hourly'];
+          final times = hourly['time'] as List;
+          final temps = hourly['temperature_2m'] as List;
+          final codes = hourly['weathercode'] as List;
+
+          final now = DateTime.now();
+          int startIndex = -1;
+
+          for(int i=0; i<times.length; i++) {
+            if (DateTime.parse(times[i]).hour == now.hour && DateTime.parse(times[i]).day == now.day) {
+              startIndex = i;
+              break;
+            }
+          }
+
+          if (startIndex == -1) return [];
+
+          List<Map<String, dynamic>> forecast = [];
+          for(int i=1; i<=3; i++) {
+            if (startIndex + i < times.length) {
+              forecast.add({
+                'time': DateTime.parse(times[startIndex + i]),
+                'temp': temps[startIndex + i],
+                'code': codes[startIndex + i],
+              });
+            }
+          }
+          return forecast;
+        }
+      } catch (e) {
+        debugPrint("Error fetching hourly forecast: $e");
+      }
+      return [];
+    }
+
+    final startForecast = await fetchForLocation(start.latitude, start.longitude);
+    final endForecast = await fetchForLocation(end.latitude, end.longitude);
+    List<Map<String, dynamic>> midForecast = [];
+
+    if (mid != null) {
+      midForecast = await fetchForLocation(mid.latitude, mid.longitude);
+    }
+
+    setState(() {
+      _hourlyForecasts['start'] = startForecast;
+      if (mid != null) _hourlyForecasts['mid'] = midForecast;
+      _hourlyForecasts['end'] = endForecast;
+    });
+  }
+
+  IconData _getWeatherIcon(int code) {
+    if (code == 0) return Icons.wb_sunny_rounded;
+    if (code >= 1 && code <= 3) return Icons.cloud_rounded;
+    if (code == 45 || code == 48) return Icons.foggy;
+    if (code >= 51 && code <= 67) return Icons.water_drop_rounded;
+    if (code >= 71 && code <= 77) return Icons.ac_unit_rounded;
+    if (code >= 80 && code <= 82) return Icons.grain_rounded;
+    if (code >= 85 && code <= 86) return Icons.ac_unit_rounded;
+    if (code >= 95) return Icons.thunderstorm_rounded;
+
+    return Icons.wb_cloudy_rounded;
+  }
+
   void _fitBounds(List<LatLng> points) {
     if (points.isEmpty) return;
 
@@ -219,219 +292,381 @@ class _JourneyScreenState extends State<JourneyScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      extendBodyBehindAppBar: true,
+      resizeToAvoidBottomInset: false,
       body: Stack(
         children: [
-          // 1. THE MAP LAYER (Background)
+          // 1. MAP LAYER
           FlutterMap(
             mapController: _mapController,
             options: const MapOptions(
               initialCenter: _kDefaultLocation,
               initialZoom: 12,
               interactionOptions: InteractionOptions(
-                flags: InteractiveFlag.all & ~InteractiveFlag.rotate, // Disable rotation for simplicity
+                flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
               ),
             ),
             children: [
-              // Free OpenStreetMap Tiles
               TileLayer(
                 urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                 userAgentPackageName: 'com.example.weather_app',
               ),
-              // The Blue Route Line
               PolylineLayer(
                 polylines: [
                   Polyline(
                     points: _routePoints,
-                    strokeWidth: 5,
-                    color: Colors.blueAccent,
+                    strokeWidth: 6,
+                    color: Colors.blueAccent.withOpacity(0.8),
+                    borderColor: Colors.blue.shade900,
+                    borderStrokeWidth: 2,
                   ),
                 ],
               ),
-              // The Markers (Start, Mid, End)
               MarkerLayer(markers: _markers),
             ],
           ),
 
-          // 2. BACK BUTTON (Top Left)
+          // 2. GRADIENT HEADER
           Positioned(
-            top: 50, left: 10,
-            child: CircleAvatar(
-              backgroundColor: Colors.white,
-              child: IconButton(
-                icon: const Icon(Icons.arrow_back, color: Colors.black87),
-                onPressed: () => Navigator.pop(context),
+            top: 0, left: 0, right: 0,
+            height: 120,
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.black.withOpacity(0.7),
+                    Colors.transparent,
+                  ],
+                ),
               ),
             ),
           ),
 
-          // 3. INPUT CARD (Top Center)
+          // 3. BACK BUTTON
+          Positioned(
+            top: 50, left: 20,
+            child: InkWell(
+              onTap: () => Navigator.pop(context),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(30),
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                  child: Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.2),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white24),
+                    ),
+                    child: const Icon(Icons.arrow_back, color: Colors.white),
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          // 4. FLOATING INPUT CARD
           Positioned(
             top: 100, left: 20, right: 20,
             child: Container(
-              padding: const EdgeInsets.all(15),
+              padding: const EdgeInsets.all(4),
               decoration: BoxDecoration(
                 color: Colors.white,
-                borderRadius: BorderRadius.circular(15),
-                boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 10)],
+                borderRadius: BorderRadius.circular(24),
+                boxShadow: [
+                  BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 15, offset: const Offset(0, 5)),
+                ],
               ),
               child: Column(
                 children: [
-                  TextField(
-                    controller: _startController,
-                    decoration: const InputDecoration(
-                        hintText: "From (e.g. Colombo)",
-                        icon: Icon(Icons.my_location, color: Colors.blue),
-                        border: InputBorder.none,
-                        contentPadding: EdgeInsets.symmetric(vertical: 5)
-                    ),
-                  ),
-                  const Divider(height: 1),
-                  TextField(
-                    controller: _endController,
-                    decoration: const InputDecoration(
-                        hintText: "To (e.g. Kandy)",
-                        icon: Icon(Icons.location_on, color: Colors.red),
-                        border: InputBorder.none,
-                        contentPadding: EdgeInsets.symmetric(vertical: 5)
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: _isLoading ? null : _calculateJourney,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.indigo,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  _buildInputField(_startController, "Start Location", Icons.my_location, Colors.blueAccent),
+                  const Divider(height: 1, indent: 50, endIndent: 20),
+                  _buildInputField(_endController, "Destination", Icons.location_on, Colors.redAccent),
+
+                  Padding(
+                    padding: const EdgeInsets.all(8.0),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: _isLoading ? null : _calculateJourney,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.indigo,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                        ),
+                        child: _isLoading
+                            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                            : const Text("Plan Trip", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                       ),
-                      child: _isLoading
-                          ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                          : const Text("Plan Trip", style: TextStyle(fontWeight: FontWeight.bold)),
                     ),
-                  )
+                  ),
                 ],
               ),
             ),
           ),
 
-          // 4. SUMMARY CARD (Bottom) - Only shows after calculation
-          if (_journeySummary != null)
+          // 5. RECENTER BUTTON (Visible when summary is hidden)
+          if (_journeySummary == null)
             Positioned(
-              bottom: 30, left: 20, right: 20,
-              child: _buildSummaryCard(),
+              bottom: 40, right: 20,
+              child: FloatingActionButton(
+                onPressed: () {
+                  _mapController.move(_kDefaultLocation, 12);
+                },
+                backgroundColor: Colors.white,
+                child: const Icon(Icons.my_location, color: Colors.indigo),
+              ),
+            ),
+
+          // 6. SCROLLABLE BOTTOM SHEET
+          if (_journeySummary != null)
+            DraggableScrollableSheet(
+              initialChildSize: 0.4,
+              minChildSize: 0.2,
+              maxChildSize: 0.85,
+              builder: (BuildContext context, ScrollController scrollController) {
+                return _buildScrollableSummary(scrollController);
+              },
             ),
         ],
       ),
     );
   }
 
-  // --- WIDGET: Bottom Summary Card ---
-  Widget _buildSummaryCard() {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1C1C2A).withOpacity(0.95), // Dark theme to match main app
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 15, offset: Offset(0, 5))],
-        border: Border.all(color: Colors.white12),
+  Widget _buildInputField(TextEditingController controller, String hint, IconData icon, Color iconColor) {
+    return TextField(
+      controller: controller,
+      style: const TextStyle(color: Colors.black87, fontWeight: FontWeight.w500),
+      decoration: InputDecoration(
+        hintText: hint,
+        hintStyle: TextStyle(color: Colors.grey.shade400),
+        prefixIcon: Icon(icon, color: iconColor),
+        border: InputBorder.none,
+        contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Header: Duration and Distance
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    );
+  }
+
+  Widget _buildScrollableSummary(ScrollController scrollController) {
+    return ClipRRect(
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(30)),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        child: Container(
+          decoration: BoxDecoration(
+            color: const Color(0xFF1C1C2A).withOpacity(0.9),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(30)),
+            border: Border.all(color: Colors.white10),
+          ),
+          child: ListView(
+            controller: scrollController,
+            padding: const EdgeInsets.fromLTRB(24, 10, 24, 40),
             children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              Center(
+                child: Container(
+                  width: 40, height: 4,
+                  margin: const EdgeInsets.only(bottom: 20),
+                  decoration: BoxDecoration(color: Colors.white30, borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+
+              // Duration & Distance Row
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text("Total Distance: $_distanceText",
-                      style: const TextStyle(color: Colors.white70, fontSize: 12)),
-                  Text("Est. Time: $_durationText",
-                      style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text("Total Distance: $_distanceText",
+                          style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                      const SizedBox(height: 2),
+                      Text("Est. Time: $_durationText",
+                          style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold, letterSpacing: -0.5)),
+                    ],
+                  ),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.blueAccent.withOpacity(0.2),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.blueAccent.withOpacity(0.3)),
+                    ),
+                    child: const Icon(Icons.directions_car, color: Colors.white, size: 28),
+                  ),
                 ],
               ),
+
+              const SizedBox(height: 24),
+
+              // AI Tips Section
               Container(
-                padding: const EdgeInsets.all(8),
+                padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.1),
-                  shape: BoxShape.circle,
+                  color: Colors.black26,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: Colors.white10),
                 ),
-                child: const Icon(Icons.directions_car, color: Colors.white),
-              ),
-            ],
-          ),
-
-          const Divider(color: Colors.white24, height: 24),
-
-          // Generic Advice Section
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Icon(Icons.auto_awesome, color: Colors.amberAccent, size: 32),
-              const SizedBox(width: 12),
-              Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text("Travel Tips:", style: TextStyle(color: Colors.amberAccent, fontWeight: FontWeight.bold, fontSize: 12)),
-                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        const Icon(Icons.auto_awesome, color: Colors.amberAccent, size: 20),
+                        const SizedBox(width: 8),
+                        const Text("Travel Assistant", style: TextStyle(color: Colors.amberAccent, fontWeight: FontWeight.bold, fontSize: 14)),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
                     Text(
                       _journeySummary!,
-                      style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.4),
+                      style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.5),
                     ),
                   ],
                 ),
               ),
+
+              const SizedBox(height: 30),
+
+              // Journey Conditions (Start, Mid, End)
+              const Text("Journey Conditions", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 16),
+              SizedBox(
+                height: 170, // Increased height to prevent overflow
+                child: ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: _routeWeather.length,
+                  itemBuilder: (context, index) {
+                    String label = index == 0 ? "Start Point" : (index == _routeWeather.length - 1 ? "Destination" : "Mid-Journey");
+                    return _buildWeatherCard(label, _routeWeather[index], true);
+                  },
+                ),
+              ),
+
+              const SizedBox(height: 30),
+
+              // Hourly Forecasts
+              if (_hourlyForecasts.isNotEmpty) ...[
+                const Text("Next 3 Hours Forecast", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 16),
+
+                if (_hourlyForecasts.containsKey('start'))
+                  _buildLocationForecastSection("At Start Point", _hourlyForecasts['start']!),
+
+                if (_hourlyForecasts.containsKey('mid') && _hourlyForecasts['mid']!.isNotEmpty)
+                  _buildLocationForecastSection("At Mid Point", _hourlyForecasts['mid']!),
+
+                if (_hourlyForecasts.containsKey('end'))
+                  _buildLocationForecastSection("At Destination", _hourlyForecasts['end']!),
+              ],
             ],
           ),
+        ),
+      ),
+    );
+  }
 
-          const SizedBox(height: 20),
+  Widget _buildLocationForecastSection(String title, List<Map<String, dynamic>> forecastData) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w500)),
+        const SizedBox(height: 10),
+        SizedBox(
+          height: 150, // Increased height to prevent overflow
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            itemCount: forecastData.length,
+            itemBuilder: (context, index) {
+              final data = forecastData[index];
+              return _buildHourlyCard(data);
+            },
+          ),
+        ),
+        const SizedBox(height: 20),
+      ],
+    );
+  }
 
-          // Horizontal List of Weather Stops
+  Widget _buildWeatherCard(String label, Weather w, bool isCurrent) {
+    return Container(
+      width: 110,
+      margin: const EdgeInsets.only(right: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Colors.white.withOpacity(0.15), Colors.white.withOpacity(0.05)],
+        ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(label, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white54, fontSize: 11)),
+          const Spacer(),
+          Icon(_getWeatherIcon(w.weatherCode), color: Colors.white, size: 36),
+          const SizedBox(height: 8),
+          Text("${w.temperature.round()}°", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20)),
+          const SizedBox(height: 4),
+          // Fixed: Text handling
           SizedBox(
-            height: 90,
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              itemCount: _routeWeather.length,
-              itemBuilder: (context, index) {
-                String label;
-                if (index == 0) label = "Start";
-                else if (index == _routeWeather.length - 1) label = "End";
-                else label = "Mid-way";
+            height: 36, // Fixed height for text
+            child: Center(
+              child: Text(
+                getWeatherCondition(w.weatherCode),
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Colors.white70, fontSize: 10, height: 1.1),
+              ),
+            ),
+          ),
+          const Spacer(),
+        ],
+      ),
+    );
+  }
 
-                return Container(
-                  width: 80,
-                  margin: const EdgeInsets.only(right: 12),
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.white10),
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(label, style: const TextStyle(color: Colors.white54, fontSize: 10)),
-                      const SizedBox(height: 6),
-                      // Weather Icon (Simplified mapping)
-                      Icon(
-                          _routeWeather[index].rain > 0 ? Icons.cloudy_snowing : Icons.wb_sunny,
-                          color: Colors.white,
-                          size: 24
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                          "${_routeWeather[index].temperature.round()}°C",
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)
-                      ),
-                    ],
-                  ),
-                );
-              },
+  Widget _buildHourlyCard(Map<String, dynamic> data) {
+    final time = data['time'] as DateTime;
+    final temp = data['temp'];
+    final code = data['code'];
+
+    return Container(
+      width: 100,
+      margin: const EdgeInsets.only(right: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.indigo.shade900.withOpacity(0.4),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.indigoAccent.withOpacity(0.2)),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text("${time.hour}:00", style: const TextStyle(color: Colors.white70, fontSize: 12)),
+          const SizedBox(height: 10),
+          Icon(_getWeatherIcon(code), color: Colors.lightBlueAccent, size: 28),
+          const SizedBox(height: 8),
+          Text("$temp°", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
+          const SizedBox(height: 4),
+          // Added SizedBox to prevent overflow
+          SizedBox(
+            height: 36, // Fixed height for forecast text
+            child: Center(
+              child: Text(
+                getWeatherCondition(code),
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Colors.white70, fontSize: 10),
+              ),
             ),
           ),
         ],
