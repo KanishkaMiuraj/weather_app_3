@@ -62,7 +62,7 @@ class _JourneyScreenState extends State<JourneyScreen> {
   Future<void> _calculateJourney() async {
     if (_startController.text.isEmpty || _endController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Ane, please enter both locations!"))
+          const SnackBar(content: Text("Please enter both start and end locations."))
       );
       return;
     }
@@ -74,12 +74,12 @@ class _JourneyScreenState extends State<JourneyScreen> {
     FocusScope.of(context).unfocus(); // Close keyboard
 
     try {
-      // 1. Geocode Start & End Locations (Convert names to Coordinates)
+      // 1. Geocode Start & End Locations
       List<Location> startLocs = await locationFromAddress(_startController.text);
       List<Location> endLocs = await locationFromAddress(_endController.text);
 
       if (startLocs.isEmpty || endLocs.isEmpty) {
-        throw Exception("Could not find one of those places. Check spelling!");
+        throw Exception("Could not find one of those places. Please check spelling.");
       }
 
       LatLng start = LatLng(startLocs.first.latitude, startLocs.first.longitude);
@@ -90,7 +90,6 @@ class _JourneyScreenState extends State<JourneyScreen> {
       final List<LatLng> polylinePoints = directionData['polyline'];
 
       // 3. Sample Points Logic (Start, Middle, End)
-      // We check weather at these specific spots along the route
       List<Map<String, double>> samplePoints = [];
 
       // Start Point
@@ -108,7 +107,7 @@ class _JourneyScreenState extends State<JourneyScreen> {
       // 4. Fetch Weather for all sampled points
       final weatherList = await _weatherService.fetchRouteWeather(samplePoints);
 
-      // 5. Get AI Insight (Kade Aunty Persona)
+      // 5. Get AI Insight (Generic Travel Assistant)
       final summary = await _assistantService.getJourneySummary(
           _startController.text,
           _endController.text,
@@ -236,7 +235,7 @@ class _JourneyScreenState extends State<JourneyScreen> {
               // Free OpenStreetMap Tiles
               TileLayer(
                 urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'com.weather_app.journey', // Required by OSM guidelines
+                userAgentPackageName: 'com.example.weather_app',
               ),
               // The Blue Route Line
               PolylineLayer(
@@ -309,7 +308,7 @@ class _JourneyScreenState extends State<JourneyScreen> {
                       ),
                       child: _isLoading
                           ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                          : const Text("Ask Kade Aunty & Plan Trip", style: TextStyle(fontWeight: FontWeight.bold)),
+                          : const Text("Plan Trip", style: TextStyle(fontWeight: FontWeight.bold)),
                     ),
                   )
                 ],
@@ -368,17 +367,17 @@ class _JourneyScreenState extends State<JourneyScreen> {
 
           const Divider(color: Colors.white24, height: 24),
 
-          // Kade Aunty's Advice Section
+          // Generic Advice Section
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(Icons.face_3, color: Colors.amberAccent, size: 32), // Auntie Icon
+              const Icon(Icons.auto_awesome, color: Colors.amberAccent, size: 32),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text("Kade Aunty says:", style: TextStyle(color: Colors.amberAccent, fontWeight: FontWeight.bold, fontSize: 12)),
+                    const Text("Travel Tips:", style: TextStyle(color: Colors.amberAccent, fontWeight: FontWeight.bold, fontSize: 12)),
                     const SizedBox(height: 4),
                     Text(
                       _journeySummary!,
