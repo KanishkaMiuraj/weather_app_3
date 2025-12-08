@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:ui'; // Required for ImageFilter
+import 'dart:ui';
 import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -44,8 +44,9 @@ class _JourneyScreenState extends State<JourneyScreen> {
   List<Marker> _markers = [];
   List<Weather> _routeWeather = [];
 
-  // Map Key: 'start', 'mid', 'end'
+  // Forecast Data
   Map<String, List<Map<String, dynamic>>> _hourlyForecasts = {};
+  List<Map<String, dynamic>> _destinationDaily = [];
 
   String? _journeySummary;
   String? _durationText;
@@ -77,6 +78,7 @@ class _JourneyScreenState extends State<JourneyScreen> {
       _isLoading = true;
       _journeySummary = null;
       _hourlyForecasts = {};
+      _destinationDaily = [];
     });
     FocusScope.of(context).unfocus();
 
@@ -107,8 +109,10 @@ class _JourneyScreenState extends State<JourneyScreen> {
 
       samplePoints.add({'lat': end.latitude, 'lng': end.longitude});
 
+      // Fetch ALL Data
       final weatherList = await _weatherService.fetchRouteWeather(samplePoints);
       await _fetchHourlyForecasts(start, midPoint, end);
+      final destDaily = await _weatherService.fetchDestinationDaily(end.latitude, end.longitude);
 
       final summary = await _assistantService.getJourneySummary(
           _startController.text,
@@ -123,6 +127,7 @@ class _JourneyScreenState extends State<JourneyScreen> {
         _durationText = directionData['duration'];
         _distanceText = directionData['distance'];
         _routePoints = polylinePoints;
+        _destinationDaily = destDaily;
 
         _markers = [];
 
@@ -130,7 +135,7 @@ class _JourneyScreenState extends State<JourneyScreen> {
           return Marker(
             point: pos,
             width: 80,
-            height: 100, // Increased height for marker
+            height: 100,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -260,7 +265,6 @@ class _JourneyScreenState extends State<JourneyScreen> {
     if (code >= 80 && code <= 82) return Icons.grain_rounded;
     if (code >= 85 && code <= 86) return Icons.ac_unit_rounded;
     if (code >= 95) return Icons.thunderstorm_rounded;
-
     return Icons.wb_cloudy_rounded;
   }
 
@@ -285,6 +289,32 @@ class _JourneyScreenState extends State<JourneyScreen> {
         padding: const EdgeInsets.all(50),
       ),
     );
+  }
+
+  // --- HIGHLIGHTING LOGIC ---
+  List<TextSpan> _buildHighlightedTips(String text) {
+    List<TextSpan> spans = [];
+    final positive = ['clear', 'sunny', 'smooth', 'safe', 'good', 'perfect', 'beautiful', 'enjoy', 'dry', 'fun'];
+    final warnings = ['rain', 'storm', 'slippery', 'fog', 'wind', 'warning', 'caution', 'danger', 'wet', 'thunder', 'flood', 'wait', 'delay', 'glare'];
+
+    // Split words but keep punctuation
+    RegExp exp = RegExp(r"(\w+|[^\w\s])");
+    Iterable<Match> matches = exp.allMatches(text);
+
+    for (Match m in matches) {
+      String word = m.group(0)!;
+      String cleanWord = word.toLowerCase();
+
+      if (warnings.contains(cleanWord)) {
+        spans.add(TextSpan(text: word, style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)));
+      } else if (positive.contains(cleanWord)) {
+        spans.add(TextSpan(text: word, style: const TextStyle(color: Colors.greenAccent, fontWeight: FontWeight.bold)));
+      } else {
+        spans.add(TextSpan(text: word));
+      }
+      spans.add(const TextSpan(text: " ")); // Add space back
+    }
+    return spans;
   }
 
   // --- UI BUILD ---
@@ -409,7 +439,7 @@ class _JourneyScreenState extends State<JourneyScreen> {
             ),
           ),
 
-          // 5. RECENTER BUTTON (Visible when summary is hidden)
+          // 5. RECENTER BUTTON
           if (_journeySummary == null)
             Positioned(
               bottom: 40, right: 20,
@@ -427,7 +457,7 @@ class _JourneyScreenState extends State<JourneyScreen> {
             DraggableScrollableSheet(
               initialChildSize: 0.4,
               minChildSize: 0.2,
-              maxChildSize: 0.85,
+              maxChildSize: 0.88,
               builder: (BuildContext context, ScrollController scrollController) {
                 return _buildScrollableSummary(scrollController);
               },
@@ -452,6 +482,14 @@ class _JourneyScreenState extends State<JourneyScreen> {
   }
 
   Widget _buildScrollableSummary(ScrollController scrollController) {
+    // UPDATED PARSING: Split by newline, clean up, and ensure we show all lines
+    final List<String> tips = _journeySummary!
+        .split('\n')
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty && s.length > 5) // Basic filter for valid lines
+        .map((s) => s.replaceAll(RegExp(r'^[\*\-\d\.]+\s*'), '')) // Clean bullets/numbers
+        .toList();
+
     return ClipRRect(
       borderRadius: const BorderRadius.vertical(top: Radius.circular(30)),
       child: BackdropFilter(
@@ -474,7 +512,7 @@ class _JourneyScreenState extends State<JourneyScreen> {
                 ),
               ),
 
-              // Duration & Distance Row
+              // Duration & Distance
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -502,7 +540,7 @@ class _JourneyScreenState extends State<JourneyScreen> {
 
               const SizedBox(height: 24),
 
-              // AI Tips Section
+              // AI Tips Section (List)
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
@@ -520,22 +558,39 @@ class _JourneyScreenState extends State<JourneyScreen> {
                         const Text("Travel Assistant", style: TextStyle(color: Colors.amberAccent, fontWeight: FontWeight.bold, fontSize: 14)),
                       ],
                     ),
-                    const SizedBox(height: 10),
-                    Text(
-                      _journeySummary!,
-                      style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.5),
-                    ),
+                    const SizedBox(height: 12),
+                    // Render each tip separately
+                    if (tips.isNotEmpty)
+                      ...tips.map((tip) => Padding(
+                        padding: const EdgeInsets.only(bottom: 8.0),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text("• ", style: TextStyle(color: Colors.white70, fontSize: 16)),
+                            Expanded(
+                              child: RichText(
+                                text: TextSpan(
+                                  style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.5),
+                                  children: _buildHighlightedTips(tip),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ))
+                    else
+                      Text(_journeySummary ?? "", style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.5)),
                   ],
                 ),
               ),
 
               const SizedBox(height: 30),
 
-              // Journey Conditions (Start, Mid, End)
+              // Journey Conditions
               const Text("Journey Conditions", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
               const SizedBox(height: 16),
               SizedBox(
-                height: 170, // Increased height to prevent overflow
+                height: 180,
                 child: ListView.builder(
                   scrollDirection: Axis.horizontal,
                   itemCount: _routeWeather.length,
@@ -562,6 +617,40 @@ class _JourneyScreenState extends State<JourneyScreen> {
                 if (_hourlyForecasts.containsKey('end'))
                   _buildLocationForecastSection("At Destination", _hourlyForecasts['end']!),
               ],
+
+              const SizedBox(height: 20),
+
+              // Destination Daily Forecast
+              if (_destinationDaily.isNotEmpty) ...[
+                const Text("Destination Forecast", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.05),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Colors.white10),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround, // Even spacing
+                    children: _destinationDaily.asMap().entries.map((entry) {
+                      int idx = entry.key;
+                      Map data = entry.value;
+                      String label = idx == 0 ? "Yesterday" : (idx == 1 ? "Today" : "Tomorrow");
+
+                      return Column(
+                        children: [
+                          Text(label, style: const TextStyle(color: Colors.white54, fontSize: 12)),
+                          const SizedBox(height: 8),
+                          Icon(_getWeatherIcon(data['code']), color: Colors.white, size: 28),
+                          const SizedBox(height: 8),
+                          Text("${data['max'].round()}° / ${data['min'].round()}°", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                        ],
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -576,7 +665,7 @@ class _JourneyScreenState extends State<JourneyScreen> {
         Text(title, style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w500)),
         const SizedBox(height: 10),
         SizedBox(
-          height: 150, // Increased height to prevent overflow
+          height: 160,
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
             itemCount: forecastData.length,
@@ -593,7 +682,7 @@ class _JourneyScreenState extends State<JourneyScreen> {
 
   Widget _buildWeatherCard(String label, Weather w, bool isCurrent) {
     return Container(
-      width: 110,
+      width: 120,
       margin: const EdgeInsets.only(right: 12),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -614,16 +703,15 @@ class _JourneyScreenState extends State<JourneyScreen> {
           const SizedBox(height: 8),
           Text("${w.temperature.round()}°", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20)),
           const SizedBox(height: 4),
-          // Fixed: Text handling
           SizedBox(
-            height: 36, // Fixed height for text
+            height: 40,
             child: Center(
               child: Text(
                 getWeatherCondition(w.weatherCode),
                 textAlign: TextAlign.center,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Colors.white70, fontSize: 10, height: 1.1),
+                style: const TextStyle(color: Colors.white70, fontSize: 11, height: 1.1),
               ),
             ),
           ),
@@ -639,7 +727,7 @@ class _JourneyScreenState extends State<JourneyScreen> {
     final code = data['code'];
 
     return Container(
-      width: 100,
+      width: 110,
       margin: const EdgeInsets.only(right: 12),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -656,16 +744,15 @@ class _JourneyScreenState extends State<JourneyScreen> {
           const SizedBox(height: 8),
           Text("$temp°", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
           const SizedBox(height: 4),
-          // Added SizedBox to prevent overflow
           SizedBox(
-            height: 36, // Fixed height for forecast text
+            height: 40,
             child: Center(
               child: Text(
                 getWeatherCondition(code),
                 textAlign: TextAlign.center,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Colors.white70, fontSize: 10),
+                style: const TextStyle(color: Colors.white70, fontSize: 11),
               ),
             ),
           ),
